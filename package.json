@@ -1,0 +1,29 @@
+{
+  "name": "dormscope",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "turbo run dev",
+    "dev:web": "npm run dev --workspace=@dormscope/web",
+    "dev:api": "npm run dev --workspace=@dormscope/api",
+    "build": "turbo run build",
+    "db:generate": "npm run generate --workspace=@dormscope/database",
+    "db:push": "npm run push --workspace=@dormscope/database",
+    "db:migrate": "npm run migrate --workspace=@dormscope/database",
+    "db:seed": "npm run seed --workspace=@dormscope/database",
+    "db:studio": "npm run studio --workspace=@dormscope/database",
+    "scraper": "npm run start --workspace=@dormscope/scraper",
+    "lint": "turbo run lint"
+  },
+  "devDependencies": {
+    "turbo": "^2.3.0",
+    "typescript": "^5.6.3"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

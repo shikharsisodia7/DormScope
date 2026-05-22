@@ -1,0 +1,16 @@
+node_modules
+.next
+dist
+.turbo
+.env
+.env.*
+!.env.example
+.env.local
+packages/database/.env
+*.log
+.DS_Store
+coverage
+playwright-report
+test-results
+uploads
+*.db
