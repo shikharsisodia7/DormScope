@@ -6,86 +6,18 @@ import { Button } from "@/components/ui/button";
 import { ScoreBreakdown } from "@/components/dorms/score-breakdown";
 import { DormActions } from "@/components/dorms/dorm-actions";
 import { ReviewForm } from "@/components/dorms/review-form";
-import { factLabel, fetchApi, moneyOrUnknown } from "@/lib/utils";
+import { factLabel, moneyOrUnknown } from "@/lib/utils";
+import { getDormBySlugs } from "@/lib/data";
 import { getDormBadges } from "@dormscope/shared";
 
-interface Review {
-  id: string;
-  overallRating: number;
-  schoolYear?: string | null;
-  pros?: string | null;
-  cons?: string | null;
-  advice?: string | null;
-  body?: string | null;
-  createdAt: string;
-}
-
-interface DormPageResponse {
-  dorm: {
-    id: string;
-    name: string;
-    slug: string;
-    bathroomStyle?: string | null;
-    dormType?: string | null;
-    hasAC?: boolean | null;
-    yearlyCost?: number | null;
-    semesterCost?: number | null;
-    freshmanEligible?: boolean | null;
-    honorsHousing?: boolean | null;
-    officialHousingUrl?: string | null;
-    confidenceScore: number;
-    dataCompletenessScore?: number | null;
-    lastUpdatedAt: string;
-    socialVibe?: number | null;
-    quietVibe?: number | null;
-    elevatorAccess?: boolean | null;
-    laundryAccess?: boolean | null;
-    kitchenAccess?: boolean | null;
-    studyLounges?: boolean | null;
-    college: { name: string; slug: string; state: string; city: string };
-    dormScore?: {
-      overallScore: number;
-      valueScore: number;
-      comfortScore: number;
-      privacyScore: number;
-      socialScore: number;
-      convenienceScore: number;
-      freshmanFitScore: number;
-      amenityScore: number;
-      dataConfidenceScore: number;
-      breakdown?: Record<string, number>;
-    } | null;
-    dormAmenities: { amenity: { name: string } }[];
-    roomTypes: { name: string; capacity?: number | null; yearlyCost?: number | null }[];
-    housingCosts: { label: string; amount: number; period: string }[];
-    reviewSummaries: {
-      ruleBasedSummary?: string | null;
-      pros: string[];
-      cons: string[];
-      vibeLabels: string[];
-    }[];
-    sources: { url: string; title?: string | null; sourceType: string }[];
-    reviews?: Review[];
-  };
-  collegeAvgCost: number;
-}
-
-async function loadDorm(collegeSlug: string, dormSlug: string): Promise<DormPageResponse | null> {
-  try {
-    return await fetchApi<DormPageResponse>(`/api/dorms/${collegeSlug}/${dormSlug}`, {
-      cache: "no-store",
-    });
-  } catch {
-    return null;
-  }
-}
+export const dynamic = "force-dynamic";
 
 export async function generateMetadata({
   params,
 }: {
   params: { slug: string; dormSlug: string };
 }): Promise<Metadata> {
-  const data = await loadDorm(params.slug, params.dormSlug);
+  const data = await getDormBySlugs(params.slug, params.dormSlug);
   if (!data) return { title: "Dorm not found" };
   const { dorm } = data;
   return {
@@ -108,7 +40,7 @@ export default async function DormProfilePage({
 }: {
   params: { slug: string; dormSlug: string };
 }) {
-  const data = await loadDorm(params.slug, params.dormSlug);
+  const data = await getDormBySlugs(params.slug, params.dormSlug);
   if (!data) notFound();
 
   const { dorm, collegeAvgCost } = data;

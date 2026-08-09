@@ -1,46 +1,19 @@
 import Link from "next/link";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { DormCard, type DormCardData } from "@/components/dorms/dorm-card";
+import { DormCard } from "@/components/dorms/dorm-card";
 import { Button } from "@/components/ui/button";
 import { CollegeCharts } from "@/components/colleges/college-charts";
-import { fetchApi } from "@/lib/utils";
+import { getCollegeBySlug } from "@/lib/data";
 
-interface CollegePageData {
-  id: string;
-  name: string;
-  slug: string;
-  city: string;
-  state: string;
-  websiteUrl?: string;
-  housingUrl?: string;
-  dorms: DormCardData[];
-  highlights: {
-    avgCost: number;
-    hasCostEvidence?: boolean;
-    cheapest?: { name: string; yearlyCost?: number } | null;
-    expensive?: { name: string; yearlyCost?: number } | null;
-    bestFreshman?: { name: string } | null;
-    bestValue?: { name: string } | null;
-    mostSocial?: { name: string } | null;
-    quietest?: { name: string } | null;
-  };
-}
-
-async function loadCollege(slug: string): Promise<CollegePageData | null> {
-  try {
-    return await fetchApi<CollegePageData>(`/api/colleges/${slug}`, { cache: "no-store" });
-  } catch {
-    return null;
-  }
-}
+export const dynamic = "force-dynamic";
 
 export async function generateMetadata({
   params,
 }: {
   params: { slug: string };
 }): Promise<Metadata> {
-  const data = await loadCollege(params.slug);
+  const data = await getCollegeBySlug(params.slug);
   if (!data) return { title: "College not found" };
   return {
     title: `${data.name} dorms`,
@@ -49,7 +22,7 @@ export async function generateMetadata({
 }
 
 export default async function CollegePage({ params }: { params: { slug: string } }) {
-  const data = await loadCollege(params.slug);
+  const data = await getCollegeBySlug(params.slug);
   if (!data) notFound();
 
   const { highlights, dorms } = data;
@@ -114,7 +87,14 @@ export default async function CollegePage({ params }: { params: { slug: string }
         </section>
       )}
 
-      {dorms.length > 0 && <CollegeCharts dorms={dorms} />}
+      {dorms.length > 0 && (
+        <CollegeCharts
+          dorms={dorms.map((d) => ({
+            ...d,
+            college: { name: data.name, slug: data.slug, state: data.state },
+          }))}
+        />
+      )}
 
       <section>
         <h2 className="font-display text-2xl tracking-tight">All dorms</h2>
@@ -122,7 +102,8 @@ export default async function CollegePage({ params }: { params: { slug: string }
           <div className="mt-6 rounded-lg border border-dashed border-border bg-card/50 px-6 py-12 text-center">
             <p className="font-medium">No halls on file for this college yet.</p>
             <p className="mt-2 text-sm text-muted-foreground">
-              Coverage is expanding. Check the official housing site, or explore other schools.
+              Most of the national directory is colleges only so far. Residence halls are being added
+              school-by-school from official housing pages — not invented.
             </p>
             <div className="mt-6 flex flex-wrap justify-center gap-3">
               {data.housingUrl && (
@@ -132,6 +113,9 @@ export default async function CollegePage({ params }: { params: { slug: string }
               )}
               <Link href="/colleges">
                 <Button variant="secondary">Explore colleges</Button>
+              </Link>
+              <Link href="/match">
+                <Button>Try a school with halls</Button>
               </Link>
             </div>
           </div>
