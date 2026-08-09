@@ -44,22 +44,25 @@ interface ExcludedResult {
 interface MatchResponse {
   college: { id: string; name: string; slug: string };
   eligible: EligibleResult[];
+  unverified?: Array<EligibleResult & { unverifiedReasons?: string[] }>;
   excluded: ExcludedResult[];
   algorithmVersion?: string;
+  coverage?: { status: string; message: string; housingUrl?: string | null };
 }
 
-/** Quick statements → preference weight ids (0–4 scale). */
+/** Quick statements → soft preference weights. Requirements are opted-in separately. */
 const QUICK_STATEMENTS: {
   id: string;
   label: string;
   weightKey: string;
+  /** Optional hard constraint key — only applied when user marks "This is required". */
   hardKey?: string;
 }[] = [
-  { id: "social", label: "I want a social hall", weightKey: "socialAtmosphere" },
-  { id: "quiet", label: "I want a quieter hall", weightKey: "quietAtmosphere" },
+  { id: "social", label: "I want a social atmosphere", weightKey: "socialAtmosphere" },
+  { id: "quiet", label: "I want a quieter atmosphere", weightKey: "quietAtmosphere" },
   { id: "space", label: "Room space matters to me", weightKey: "roomSpaciousness" },
-  { id: "bath", label: "I want a private bathroom", weightKey: "bathroomPrivacy", hardKey: "requirePrivateBath" },
-  { id: "ac", label: "I need air conditioning", weightKey: "airConditioning", hardKey: "requireAC" },
+  { id: "bath", label: "I strongly prefer a private bathroom", weightKey: "privateBathroom", hardKey: "requirePrivateBath" },
+  { id: "ac", label: "I strongly prefer air conditioning", weightKey: "airConditioning", hardKey: "requireAC" },
   { id: "afford", label: "Affordability is a priority", weightKey: "affordability" },
   { id: "location", label: "Campus location matters", weightKey: "location" },
 ];
@@ -76,6 +79,7 @@ export function MatchClient({ collegeSlug }: { collegeSlug?: string }) {
   const [step, setStep] = useState<1 | 2 | 3 | "results">(1);
   const [college, setCollege] = useState<CollegeOption | null>(null);
   const [quick, setQuick] = useState<Record<string, boolean>>({});
+  const [requiredQuick, setRequiredQuick] = useState<Record<string, boolean>>({});
   const [weights, setWeights] = useState<Record<string, number>>({});
   const [hard, setHard] = useState<Record<string, boolean | number | null>>({});
   const [maxBudget, setMaxBudget] = useState("");
@@ -85,6 +89,7 @@ export function MatchClient({ collegeSlug }: { collegeSlug?: string }) {
   const [error, setError] = useState<string | null>(null);
   const [results, setResults] = useState<MatchResponse | null>(null);
   const [showExcluded, setShowExcluded] = useState(false);
+  const [showUnverified, setShowUnverified] = useState(true);
   const [compare, setCompare] = useState<string[]>([]);
   const [showAdvanced, setShowAdvanced] = useState(false);
 
@@ -137,14 +142,17 @@ export function MatchClient({ collegeSlug }: { collegeSlug?: string }) {
   }
 
   function applyQuickToHard(): Record<string, boolean | number | null> {
-    const next = { ...hard };
+    // Start from advanced hard checkboxes; only add quick→required when opted in.
+    const next: Record<string, boolean | number | null> = { ...hard };
     for (const s of QUICK_STATEMENTS) {
-      if (s.hardKey) next[s.hardKey] = !!quick[s.id];
+      if (!s.hardKey) continue;
+      if (requiredQuick[s.id] && quick[s.id]) next[s.hardKey] = true;
+      else if (!showAdvanced) next[s.hardKey] = false;
     }
     if (maxBudget.trim()) {
       const n = Number(maxBudget);
       if (!Number.isNaN(n) && n > 0) next.maxBudget = n;
-    } else {
+    } else if (!showAdvanced) {
       next.maxBudget = null;
     }
     return next;
@@ -251,7 +259,7 @@ export function MatchClient({ collegeSlug }: { collegeSlug?: string }) {
             {QUICK_STATEMENTS.map((s) => {
               const on = !!quick[s.id];
               return (
-                <li key={s.id}>
+                <li key={s.id} className="space-y-1">
                   <button
                     type="button"
                     aria-pressed={on}
@@ -264,12 +272,19 @@ export function MatchClient({ collegeSlug }: { collegeSlug?: string }) {
                     )}
                   >
                     {s.label}
-                    {s.hardKey && on && (
-                      <span className="mt-1 block text-xs text-muted-foreground">
-                        Also treated as a hard requirement (halls without evidence stay eligible)
-                      </span>
-                    )}
                   </button>
+                  {s.hardKey && on && (
+                    <label className="flex items-center gap-2 px-1 text-xs text-muted-foreground">
+                      <input
+                        type="checkbox"
+                        checked={!!requiredQuick[s.id]}
+                        onChange={(e) =>
+                          setRequiredQuick((r) => ({ ...r, [s.id]: e.target.checked }))
+                        }
+                      />
+                      This is required (unknown evidence stays in a separate “not verified” group)
+                    </label>
+                  )}
                 </li>
               );
             })}
@@ -303,7 +318,7 @@ export function MatchClient({ collegeSlug }: { collegeSlug?: string }) {
           <div>
             <h2 className="font-display text-2xl">Fine-tune preferences</h2>
             <p className="mt-1 text-sm text-muted-foreground">
-              Soft weights influence ranking. Hard requirements exclude halls that fail (unknown does not fail).
+              Soft weights influence ranking. Hard requirements exclude confirmed failures; unknown evidence is listed separately as unverified.
             </p>
           </div>
 
@@ -416,8 +431,11 @@ export function MatchClient({ collegeSlug }: { collegeSlug?: string }) {
               <p className="text-sm text-muted-foreground">{results.college.name}</p>
               <h2 className="font-display text-3xl tracking-tight">Your ranked dorms</h2>
               <p className="mt-1 text-sm text-muted-foreground">
-                {results.eligible.length} eligible
-                {results.excluded.length > 0 ? ` · ${results.excluded.length} excluded by hard constraints` : ""}
+                {results.eligible.length} confirmed
+                {(results.unverified?.length ?? 0) > 0
+                  ? ` · ${results.unverified!.length} could match (not verified)`
+                  : ""}
+                {results.excluded.length > 0 ? ` · ${results.excluded.length} excluded` : ""}
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -438,14 +456,31 @@ export function MatchClient({ collegeSlug }: { collegeSlug?: string }) {
             </div>
           </div>
 
-          {results.eligible.length === 0 ? (
+          {results.coverage && (
             <div className="rounded-lg border border-border bg-card p-6">
-              <p className="font-medium">No halls matched your hard requirements.</p>
+              <p className="font-medium">Housing inventory not indexed yet</p>
+              <p className="mt-2 text-sm text-muted-foreground">{results.coverage.message}</p>
+              {results.coverage.housingUrl && (
+                <a
+                  href={results.coverage.housingUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="mt-3 inline-block text-sm text-primary underline-offset-4 hover:underline"
+                >
+                  Official housing website
+                </a>
+              )}
+            </div>
+          )}
+
+          {results.eligible.length === 0 && !results.coverage ? (
+            <div className="rounded-lg border border-border bg-card p-6">
+              <p className="font-medium">No halls confirmed against your hard requirements.</p>
               <p className="mt-2 text-sm text-muted-foreground">
-                Relax a constraint or turn on excluded halls below to see what was filtered out.
+                Check the unverified group or relax a requirement.
               </p>
             </div>
-          ) : (
+          ) : results.eligible.length > 0 ? (
             <ul className="space-y-4">
               {results.eligible.map((r, idx) => (
                 <li key={r.dormId} className="rounded-xl border border-border bg-card p-5 shadow-sm">
@@ -498,6 +533,32 @@ export function MatchClient({ collegeSlug }: { collegeSlug?: string }) {
                 </li>
               ))}
             </ul>
+          ) : null}
+
+          {(results.unverified?.length ?? 0) > 0 && (
+            <div className="space-y-3">
+              <label className="flex items-center gap-2 text-sm font-medium">
+                <input
+                  type="checkbox"
+                  checked={showUnverified}
+                  onChange={(e) => setShowUnverified(e.target.checked)}
+                  className="accent-[hsl(var(--primary))]"
+                />
+                Could match, but a requirement is not verified ({results.unverified!.length})
+              </label>
+              {showUnverified && (
+                <ul className="space-y-3">
+                  {results.unverified!.map((r) => (
+                    <li key={r.dormId} className="rounded-lg border border-dashed border-border p-4">
+                      <p className="font-medium">{r.name}</p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {(r.unverifiedReasons ?? []).join(" · ")}
+                      </p>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
           )}
 
           {results.excluded.length > 0 && (

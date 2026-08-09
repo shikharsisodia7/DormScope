@@ -16,6 +16,8 @@ const matchSchema = z.object({
   saveRun: z.boolean().optional(),
   shareToken: z.boolean().optional(),
   limit: z.number().int().min(1).max(100).optional(),
+  /** When true, also rank the unverified group (default false — shown separately). */
+  includeUnverifiedInRanking: z.boolean().optional(),
 });
 
 export async function POST(req: Request) {
@@ -26,14 +28,43 @@ export async function POST(req: Request) {
     if (!college) return jsonError("College not found", 404);
 
     const dorms = await prisma.dorm.findMany({
-      where: { collegeId: college.id, isActive: true },
+      where: {
+        collegeId: college.id,
+        isActive: true,
+        isAssignableHousingOption: true,
+        rankingGranularity: true,
+      },
       include: {
         college: { select: { name: true } },
         dormScore: true,
         roomTypes: true,
         dormAmenities: { include: { amenity: true } },
+        parentHousing: { select: { id: true, name: true, slug: true } },
       },
     });
+
+    if (dorms.length === 0) {
+      return jsonOk({
+        college: {
+          id: college.id,
+          name: college.name,
+          slug: college.slug,
+          housingUrl: college.housingUrl,
+          housingCoverageStatus: college.housingCoverageStatus,
+          dataFreshnessAt: college.dataFreshnessAt,
+        },
+        algorithmVersion: ALGORITHM_VERSION,
+        coverage: {
+          status: college.housingCoverageStatus,
+          message:
+            "This institution is in the national directory, but its on-campus housing inventory is not indexed yet (or has not been confirmed). Missing inventory is not the same as having no housing.",
+          housingUrl: college.housingUrl,
+        },
+        eligible: [],
+        unverified: [],
+        excluded: [],
+      });
+    }
 
     const costAgg = await prisma.dorm.aggregate({
       where: { collegeId: college.id, yearlyCost: { not: null } },
@@ -49,8 +80,17 @@ export async function POST(req: Request) {
       toggles: input.toggles,
     };
 
-    const { eligible, excluded } = filterByHardConstraints(rankable, profile.hardConstraints);
-    const ranked = rankDormsForPreferences(eligible, profile, { limit: input.limit });
+    const { eligible, excluded, unverified } = filterByHardConstraints(rankable, profile.hardConstraints);
+    const ranked = rankDormsForPreferences(eligible, { ...profile, hardConstraints: {} }, { limit: input.limit });
+    const rankedUnverified = input.includeUnverifiedInRanking
+      ? rankDormsForPreferences(unverified.map((u) => u.dorm), { ...profile, hardConstraints: {} }, { limit: input.limit })
+      : unverified.map((u) => {
+          const [one] = rankDormsForPreferences([u.dorm], { ...profile, hardConstraints: {} }, { limit: 1 });
+          return {
+            ...one,
+            unverifiedReasons: u.reasons,
+          };
+        });
 
     let shareToken: string | undefined;
     let matchRunId: string | undefined;
@@ -105,6 +145,19 @@ export async function POST(req: Request) {
         confidenceLabel: r.confidenceLabel,
         reasons: r.reasons,
         dimensionScores: r.dimensionScores,
+      })),
+      unverified: rankedUnverified.map((r, idx) => ({
+        dormId: r.dorm.id,
+        name: r.dorm.name,
+        slug: r.dorm.slug,
+        matchScore: r.matchScore,
+        confidence: r.confidence,
+        confidenceLabel: r.confidenceLabel,
+        reasons: r.reasons,
+        unverifiedReasons:
+          "unverifiedReasons" in r
+            ? (r as { unverifiedReasons?: string[] }).unverifiedReasons
+            : unverified[idx]?.reasons ?? [],
       })),
       excluded: excluded.map((e) => ({
         dormId: e.dorm.id,

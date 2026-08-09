@@ -2,8 +2,12 @@
   "name": "@dormscope/database",
   "version": "1.0.0",
   "private": true,
+  "type": "module",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
   "scripts": {
     "generate": "prisma generate",
     "push": "prisma db push",
@@ -13,7 +17,8 @@
     "build": "prisma generate",
     "import:institutions": "tsx scripts/import-institutions.ts",
     "seed:halls": "tsx scripts/seed-official-hall-directories.ts",
-    "coverage": "tsx scripts/coverage-report.ts"
+    "coverage": "tsx scripts/coverage-report.ts",
+    "backfill:eligibility": "tsx scripts/backfill-unknown-eligibility.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0"

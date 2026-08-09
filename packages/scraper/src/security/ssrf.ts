@@ -9,9 +9,7 @@ export class SafeUrlError extends Error {
 }
 
 export interface SafeUrlOptions {
-  /** Skip DNS resolution (only syntactic / literal-IP checks). Default false. */
   skipDns?: boolean;
-  /** Allow http in addition to https. Default true. */
   allowHttp?: boolean;
 }
 
@@ -25,10 +23,10 @@ function isPrivateOrReservedIpv4(ip: string): boolean {
     [ipv4ToInt("0.0.0.0"), ipv4ToInt("0.255.255.255")],
     [ipv4ToInt("10.0.0.0"), ipv4ToInt("10.255.255.255")],
     [ipv4ToInt("127.0.0.0"), ipv4ToInt("127.255.255.255")],
-    [ipv4ToInt("169.254.0.0"), ipv4ToInt("169.254.255.255")], // link-local + AWS metadata
+    [ipv4ToInt("169.254.0.0"), ipv4ToInt("169.254.255.255")],
     [ipv4ToInt("172.16.0.0"), ipv4ToInt("172.31.255.255")],
     [ipv4ToInt("192.168.0.0"), ipv4ToInt("192.168.255.255")],
-    [ipv4ToInt("100.64.0.0"), ipv4ToInt("100.127.255.255")], // CGNAT
+    [ipv4ToInt("100.64.0.0"), ipv4ToInt("100.127.255.255")],
     [ipv4ToInt("192.0.0.0"), ipv4ToInt("192.0.0.255")],
     [ipv4ToInt("192.0.2.0"), ipv4ToInt("192.0.2.255")],
     [ipv4ToInt("198.18.0.0"), ipv4ToInt("198.19.255.255")],
@@ -42,10 +40,9 @@ function isPrivateOrReservedIpv4(ip: string): boolean {
 function isPrivateOrReservedIpv6(ip: string): boolean {
   const lower = ip.toLowerCase();
   if (lower === "::" || lower === "::1") return true;
-  if (lower.startsWith("fc") || lower.startsWith("fd")) return true; // unique local
-  if (lower.startsWith("fe80")) return true; // link-local
-  if (lower.startsWith("ff")) return true; // multicast
-  // IPv4-mapped
+  if (lower.startsWith("fc") || lower.startsWith("fd")) return true;
+  if (lower.startsWith("fe80")) return true;
+  if (lower.startsWith("ff")) return true;
   if (lower.startsWith("::ffff:")) {
     const v4 = lower.slice("::ffff:".length);
     if (isIP(v4) === 4) return isPrivateOrReservedIpv4(v4);
@@ -71,9 +68,6 @@ function isBlockedHost(hostname: string): boolean {
   return false;
 }
 
-/**
- * Returns true when URL is http(s) and does not resolve to private/reserved addresses.
- */
 export async function isSafeUrl(raw: string, options: SafeUrlOptions = {}): Promise<boolean> {
   try {
     await assertSafeUrl(raw, options);
@@ -104,7 +98,6 @@ export async function assertSafeUrl(raw: string, options: SafeUrlOptions = {}): 
     throw new SafeUrlError("Blocked host / private address");
   }
 
-  // Explicit metadata IP check (also covered by 169.254/16)
   if (url.hostname === "169.254.169.254") {
     throw new SafeUrlError("Blocked cloud metadata address");
   }
@@ -127,4 +120,75 @@ export async function assertSafeUrl(raw: string, options: SafeUrlOptions = {}): 
   }
 
   return url;
+}
+
+export function canonicalizeUrl(raw: string): string {
+  const u = new URL(raw);
+  u.hash = "";
+  // strip common tracking params
+  for (const key of Array.from(u.searchParams.keys())) {
+    if (/^(utm_|fbclid|gclid|mc_)/i.test(key)) u.searchParams.delete(key);
+  }
+  u.hostname = u.hostname.toLowerCase();
+  let path = u.pathname.replace(/\/+$/, "") || "/";
+  return `${u.protocol}//${u.hostname}${path}${u.search}`;
+}
+
+export interface SafeFetchResult {
+  html: string | null;
+  finalUrl: string;
+  status: number;
+  contentHash?: string;
+}
+
+/**
+ * Fetch HTML while validating every redirect hop against SSRF rules.
+ */
+export async function fetchHtmlSafe(
+  rawUrl: string,
+  options: {
+    userAgent?: string;
+    maxRedirects?: number;
+    timeoutMs?: number;
+  } = {}
+): Promise<SafeFetchResult> {
+  const maxRedirects = options.maxRedirects ?? 5;
+  let current = rawUrl;
+  for (let hop = 0; hop <= maxRedirects; hop++) {
+    await assertSafeUrl(current);
+    const res = await fetch(current, {
+      headers: {
+        "User-Agent":
+          options.userAgent ??
+          "Mozilla/5.0 (compatible; DormScopeBot/1.2; +https://dormscope-six.vercel.app; research)",
+        Accept: "text/html,application/xhtml+xml",
+      },
+      redirect: "manual",
+      signal: AbortSignal.timeout(options.timeoutMs ?? 25000),
+    });
+
+    if ([301, 302, 303, 307, 308].includes(res.status)) {
+      const loc = res.headers.get("location");
+      if (!loc) {
+        return { html: null, finalUrl: current, status: res.status };
+      }
+      const next = new URL(loc, current).toString();
+      await assertSafeUrl(next);
+      current = next;
+      continue;
+    }
+
+    if (!res.ok) {
+      return { html: null, finalUrl: current, status: res.status };
+    }
+    const ct = res.headers.get("content-type") ?? "";
+    if (ct && !/html|text|xml/i.test(ct)) {
+      return { html: null, finalUrl: res.url || current, status: res.status };
+    }
+    const html = await res.text();
+    const { createHash } = await import("crypto");
+    const contentHash = createHash("sha256").update(html).digest("hex").slice(0, 32);
+    return { html, finalUrl: res.url || current, status: res.status, contentHash };
+  }
+  throw new SafeUrlError("Too many redirects");
 }

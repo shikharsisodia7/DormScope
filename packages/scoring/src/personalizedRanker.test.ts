@@ -77,14 +77,15 @@ const fixtures: RankableDorm[] = [
 
 describe("filterByHardConstraints", () => {
   it("excludes communal halls when private bathroom is required", () => {
-    const { eligible, excluded } = filterByHardConstraints(fixtures, {
+    const { eligible, excluded, unverified } = filterByHardConstraints(fixtures, {
       requirePrivateBath: true,
     });
     expect(eligible.map((d) => d.id)).not.toContain("communal-hall");
     expect(eligible.map((d) => d.id)).not.toContain("suite-hall");
     expect(excluded.some((e) => e.dorm.id === "communal-hall")).toBe(true);
-    // Unknown bathroom is NOT treated as communal — stays eligible
-    expect(eligible.map((d) => d.id)).toContain("unknown-bath");
+    // Unknown bathroom is NOT silently treated as satisfied
+    expect(unverified.map((u) => u.dorm.id)).toContain("unknown-bath");
+    expect(eligible.map((d) => d.id)).not.toContain("unknown-bath");
   });
 
   it("excludes communal when private-or-suite is required", () => {
@@ -104,6 +105,34 @@ describe("filterByHardConstraints", () => {
     expect(eligible.map((d) => d.id)).not.toContain("upperclass-only");
     expect(excluded.some((e) => e.dorm.id === "upperclass-only")).toBe(true);
     expect(eligible.map((d) => d.id)).toContain("private-hall");
+  });
+
+  it("puts unknown AC into unverified when AC is required", () => {
+    const { eligible, unverified, excluded } = filterByHardConstraints(
+      [
+        dorm({ id: "has-ac", name: "Cool Hall", hasAC: true }),
+        dorm({ id: "no-ac", name: "Warm Hall", hasAC: false }),
+        dorm({ id: "unk-ac", name: "Mystery AC", hasAC: null }),
+      ],
+      { requireAC: true }
+    );
+    expect(eligible.map((d) => d.id)).toEqual(["has-ac"]);
+    expect(excluded.map((e) => e.dorm.id)).toContain("no-ac");
+    expect(unverified.map((u) => u.dorm.id)).toContain("unk-ac");
+  });
+
+  it("puts unknown budget into unverified when maxBudget is set", () => {
+    const { eligible, unverified, excluded } = filterByHardConstraints(
+      [
+        dorm({ id: "cheap", name: "Cheap", yearlyCost: 8000 }),
+        dorm({ id: "pricey", name: "Pricey", yearlyCost: 20000 }),
+        dorm({ id: "unk-cost", name: "Unknown Cost", yearlyCost: null }),
+      ],
+      { maxBudget: 12000 }
+    );
+    expect(eligible.map((d) => d.id)).toEqual(["cheap"]);
+    expect(excluded.map((e) => e.dorm.id)).toContain("pricey");
+    expect(unverified.map((u) => u.dorm.id)).toContain("unk-cost");
   });
 });
 

@@ -73,9 +73,29 @@ enum HousingCoverageStatus {
   UNKNOWN
   NO_HOUSING
   DISCOVERY_PENDING
+  SITE_FOUND
+  DIRECTORY_PENDING
   PARTIAL
   COMPLETE
+  BLOCKED
   FAILED
+  RETRYABLE
+}
+
+/// Structural role of a housing record in the university's inventory.
+enum HousingEntityKind {
+  COMPLEX
+  RESIDENTIAL_COLLEGE
+  VILLAGE
+  UNIT
+  BUILDING
+  HOUSE
+  APARTMENT_COMMUNITY
+  SUITE_COMMUNITY
+  LIVING_COMMUNITY
+  RESIDENCE
+  OTHER
+  UNKNOWN
 }
 
 enum ReviewStatus {
@@ -133,6 +153,8 @@ model College {
   matchRuns              MatchRun[]
   savedByUsers           SavedCollege[]
   institutionImports     InstitutionImport[]
+  ingestCheckpoint       IngestCheckpoint?
+  extractionDecisions    ExtractionDecision[]
 
   @@index([state])
   @@index([name])
@@ -186,12 +208,22 @@ model Dorm {
   collegeId               String
   college                 College        @relation(fields: [collegeId], references: [id], onDelete: Cascade)
   dormType                DormType       @default(UNKNOWN)
-  freshmanEligible        Boolean        @default(true)
-  upperclassEligible      Boolean        @default(true)
-  honorsHousing           Boolean        @default(false)
-  themedHousing           Boolean        @default(false)
-  genderInclusive         Boolean        @default(false)
+  /// Tri-state housing facts: null = unknown / not collected (never treat as true/false).
+  freshmanEligible        Boolean?
+  upperclassEligible      Boolean?
+  honorsHousing           Boolean?
+  themedHousing           Boolean?
+  genderInclusive         Boolean?
   bathroomStyle           BathroomStyle  @default(UNKNOWN)
+  /// Hierarchy + ranking granularity (backward-compatible additions).
+  entityKind              HousingEntityKind @default(UNKNOWN)
+  officialCategoryLabel   String?
+  parentHousingId         String?
+  parentHousing           Dorm?          @relation("HousingHierarchy", fields: [parentHousingId], references: [id], onDelete: SetNull)
+  childHousing            Dorm[]         @relation("HousingHierarchy")
+  isAssignableHousingOption Boolean      @default(true)
+  isPhysicalBuilding      Boolean        @default(true)
+  rankingGranularity      Boolean        @default(true) // true = include in Match rankings when assignable
   hasAC                   Boolean?
   hasHeating              Boolean?
   laundryAccess           Boolean?
@@ -254,6 +286,7 @@ model Dorm {
   dormAmenities           DormAmenity[]
   housingCosts            HousingCost[]
   sources                 Source[]
+  dormSources             DormSource[]
   reviewSummaries         ReviewSummary[]
   reviews                 Review[]
   dormScore               DormScore?
@@ -262,6 +295,7 @@ model Dorm {
   fieldProvenance         FieldProvenance[]
   dataCorrections         DataCorrection[]
   matchResults            MatchResult[]
+  extractionDecisions     ExtractionDecision[]
 
   @@unique([collegeId, slug])
   @@index([collegeId])
@@ -270,6 +304,9 @@ model Dorm {
   @@index([campusId])
   @@index([isActive])
   @@index([isVerified])
+  @@index([parentHousingId])
+  @@index([isAssignableHousingOption])
+  @@index([entityKind])
 }
 
 model DormAlias {
@@ -342,24 +379,97 @@ model HousingCost {
 // ─── Sources & Provenance ────────────────────────────────────────────────────
 
 model Source {
-  id          String     @id @default(cuid())
-  url         String
-  title       String?
-  sourceType  SourceType @default(OTHER)
-  confidence  Float      @default(0.5)
-  scrapedAt   DateTime?
-  collegeId   String?
-  college     College?   @relation(fields: [collegeId], references: [id], onDelete: SetNull)
-  dormId      String?
-  dorm        Dorm?      @relation(fields: [dormId], references: [id], onDelete: SetNull)
-  isApproved  Boolean    @default(false)
-  rawSnippet  String?
-  createdAt   DateTime   @default(now())
+  id            String     @id @default(cuid())
+  url           String
+  /// Normalized URL used for deduplication (scheme/host/path, stripped fragments/tracking).
+  canonicalUrl  String?
+  title         String?
+  sourceType    SourceType @default(OTHER)
+  confidence    Float      @default(0.5)
+  scrapedAt     DateTime?
+  collegeId     String?
+  college       College?   @relation(fields: [collegeId], references: [id], onDelete: SetNull)
+  /// Legacy single-dorm link kept for compatibility; prefer DormSource for directories.
+  dormId        String?
+  dorm          Dorm?      @relation(fields: [dormId], references: [id], onDelete: SetNull)
+  isApproved    Boolean    @default(false)
+  rawSnippet    String?
+  contentHash   String?
+  httpStatus    Int?
+  finalUrl      String?
+  extractorVersion String?
+  pageRole      String?
+  createdAt     DateTime   @default(now())
 
   fieldProvenance FieldProvenance[]
+  dormSources     DormSource[]
+  extractionDecisions ExtractionDecision[]
 
   @@index([collegeId])
   @@index([dormId])
+  @@index([canonicalUrl])
+  @@unique([collegeId, canonicalUrl])
+}
+
+/// Many-to-many: one directory page can support many housing entities.
+model DormSource {
+  id        String   @id @default(cuid())
+  dormId    String
+  dorm      Dorm     @relation(fields: [dormId], references: [id], onDelete: Cascade)
+  sourceId  String
+  source    Source   @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  role      String?  // directory | detail | rates | eligibility
+  createdAt DateTime @default(now())
+
+  @@unique([dormId, sourceId])
+  @@index([sourceId])
+  @@index([dormId])
+}
+
+/// Accepted/rejected housing candidates for diagnostics (not published inventory).
+model ExtractionDecision {
+  id          String   @id @default(cuid())
+  collegeId   String
+  college     College  @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  sourceId    String?
+  source      Source?  @relation(fields: [sourceId], references: [id], onDelete: SetNull)
+  dormId      String?
+  dorm        Dorm?    @relation(fields: [dormId], references: [id], onDelete: SetNull)
+  candidateName String
+  accepted    Boolean
+  confidence  Float    @default(0)
+  reasons     Json
+  pageUrl     String?
+  createdAt   DateTime @default(now())
+
+  @@index([collegeId, accepted])
+  @@index([sourceId])
+  @@index([dormId])
+}
+
+/// Resumable national ingestion checkpoints per institution.
+model IngestCheckpoint {
+  id              String   @id @default(cuid())
+  collegeId       String   @unique
+  college         College  @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  stage           String   @default("queued") // queued|classify|discover|directory|extract|enrich|validate|complete
+  status          String   @default("pending") // pending|running|blocked|retryable|failed|complete|no_housing
+  pagesVisited    Int      @default(0)
+  candidateUrls   String[] @default([])
+  failureClass    String?
+  lastHttpStatus  Int?
+  retryCount      Int      @default(0)
+  nextRetryAt     DateTime?
+  lastError       String?
+  lastSuccessAt   DateTime?
+  lockedAt        DateTime?
+  lockOwner       String?
+  metadata        Json?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([status, nextRetryAt])
+  @@index([stage])
 }
 
 model FieldProvenance {

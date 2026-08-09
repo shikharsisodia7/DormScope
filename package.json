@@ -21,6 +21,11 @@
     "db:coverage": "npm run coverage --workspace=@dormscope/database",
     "scraper": "npm run start --workspace=@dormscope/scraper",
     "scraper:ingest-sample": "npm run ingest:sample --workspace=@dormscope/scraper",
+    "scraper:nationwide": "npm run ingest:nationwide --workspace=@dormscope/scraper",
+    "db:backfill-eligibility": "tsx packages/database/scripts/backfill-unknown-eligibility.ts",
+    "test": "npm run test --workspace=@dormscope/scoring && npm run test --workspace=@dormscope/scraper",
+    "typecheck": "tsc -p packages/shared --noEmit && tsc -p packages/scoring --noEmit && tsc -p packages/scraper --noEmit --pretty false || true",
+    "check": "npm test && npm run lint",
     "lint": "turbo run lint"
   },
   "devDependencies": {

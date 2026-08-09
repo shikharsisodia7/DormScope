@@ -112,9 +112,21 @@ export interface ExcludedMatch<T extends RankableDorm = RankableDorm> {
   reasons: string[];
 }
 
+export interface UnverifiedMatch<T extends RankableDorm = RankableDorm> {
+  dorm: T;
+  reasons: string[];
+}
+
 export interface HardConstraintFilterResult<T extends RankableDorm = RankableDorm> {
+  /** Confirmed to satisfy all active hard requirements (or no hard reqs). */
   eligible: T[];
+  /** Known to violate at least one hard requirement. */
   excluded: ExcludedMatch<T>[];
+  /**
+   * Does not have known violations, but one or more required facts are unknown
+   * (e.g. AC unknown when requireAC, cost unknown when maxBudget).
+   */
+  unverified: UnverifiedMatch<T>[];
 }
 
 function clamp(n: number, min: number, max: number): number {
@@ -527,8 +539,10 @@ export function scoreDimension(
 }
 
 /**
- * Hard constraints FILTER halls with known violations.
- * Missing/unknown evidence does NOT exclude (never treat null as false).
+ * Hard constraints:
+ * - known violation → excluded
+ * - required fact unknown → unverified (not silently treated as satisfied)
+ * - known satisfaction / no hard reqs → eligible
  */
 export function filterByHardConstraints<T extends RankableDorm>(
   dorms: T[],
@@ -536,111 +550,101 @@ export function filterByHardConstraints<T extends RankableDorm>(
 ): HardConstraintFilterResult<T> {
   const eligible: T[] = [];
   const excluded: ExcludedMatch<T>[] = [];
+  const unverified: UnverifiedMatch<T>[] = [];
 
   for (const dorm of dorms) {
-    const reasons: string[] = [];
+    const violate: string[] = [];
+    const unknown: string[] = [];
 
     if (constraints.requireFreshmanEligible === true) {
-      if (dorm.freshmanEligible === false) {
-        reasons.push("Not eligible for freshmen");
-      }
+      if (dorm.freshmanEligible === false) violate.push("Not eligible for freshmen");
+      else if (dorm.freshmanEligible == null) unknown.push("Freshman eligibility not verified");
     }
 
     if (constraints.requireUpperclassEligible === true) {
-      if (dorm.upperclassEligible === false) {
-        reasons.push("Not eligible for upperclass students");
-      }
+      if (dorm.upperclassEligible === false) violate.push("Not eligible for upperclass students");
+      else if (dorm.upperclassEligible == null) unknown.push("Upperclass eligibility not verified");
     }
 
     if (constraints.maxBudget != null && Number.isFinite(constraints.maxBudget)) {
       if (dorm.yearlyCost != null && dorm.yearlyCost > constraints.maxBudget) {
-        reasons.push(`Yearly cost exceeds budget of $${constraints.maxBudget}`);
+        violate.push(`Yearly cost exceeds budget of $${constraints.maxBudget}`);
+      } else if (dorm.yearlyCost == null) {
+        unknown.push("Cost not verified against budget");
       }
     }
 
     if (constraints.requireSingle === true) {
       const has = dormHasSingle(dorm);
-      if (has === false) reasons.push("No single rooms available");
+      if (has === false) violate.push("No single rooms available");
+      else if (has == null) unknown.push("Single-room availability not verified");
     }
 
-    if (constraints.requirePrivateBath === true) {
+    if (constraints.requirePrivateBath === true || constraints.privateBathroom === true || constraints.requirePrivateBathroom === true) {
       const has = dormHasPrivateBath(dorm);
-      if (has === false) reasons.push("Does not have a private bathroom");
+      if (has === false) violate.push("Does not have a private bathroom");
+      else if (has == null) unknown.push("Private bathroom not verified");
     }
 
     if (constraints.requirePrivateOrSuiteBath === true) {
       const priv = dormHasPrivateBath(dorm);
       const suite = dormHasSuiteBath(dorm);
-      // Only exclude when we know it's communal (not private and not suite)
       if (priv === false && suite === false) {
-        reasons.push("Bathroom is communal; private or suite required");
+        violate.push("Bathroom is communal; private or suite required");
       } else if (priv === false && suite == null) {
         const bath = normalizeBathroom(dorm.bathroomStyle);
         if (bath === "COMMUNAL") {
-          reasons.push("Bathroom is communal; private or suite required");
+          violate.push("Bathroom is communal; private or suite required");
+        } else if (bath === "UNKNOWN" || bath == null) {
+          unknown.push("Private/suite bathroom not verified");
         }
+      } else if (priv == null && suite == null) {
+        unknown.push("Private/suite bathroom not verified");
       }
     }
 
-    if (constraints.requireGenderInclusive === true) {
-      if (dorm.genderInclusive === false) {
-        reasons.push("Not gender-inclusive housing");
-      }
+    if (constraints.requireGenderInclusive === true || constraints.genderInclusive === true) {
+      if (dorm.genderInclusive === false) violate.push("Not gender-inclusive housing");
+      else if (dorm.genderInclusive == null) unknown.push("Gender-inclusive status not verified");
     }
 
-    if (constraints.requireAC === true) {
-      if (dorm.hasAC === false) {
-        reasons.push("No air conditioning");
-      }
+    if (constraints.requireAC === true || constraints.airConditioning === true) {
+      if (dorm.hasAC === false) violate.push("No air conditioning");
+      else if (dorm.hasAC == null) unknown.push("Air conditioning not verified");
     }
 
-    if (constraints.requireAccessibility === true) {
+    if (constraints.requireAccessibility === true || constraints.accessibility === true) {
       const a = accessibilityScore(dorm);
-      if (a === false) reasons.push("Accessibility features not available");
+      if (a === false) violate.push("Accessibility features not available");
+      else if (a == null) unknown.push("Accessibility not verified");
     }
 
     if (constraints.requireSubstanceFree === true) {
       const s = substanceFreeScore(dorm);
-      if (s === false) reasons.push("Not a substance-free community");
+      if (s === false) violate.push("Not a substance-free community");
+      else if (s == null) unknown.push("Substance-free status not verified");
     }
 
     if (constraints.requireElevator === true) {
-      if (dorm.elevatorAccess === false) {
-        reasons.push("No elevator access");
-      }
+      if (dorm.elevatorAccess === false) violate.push("No elevator access");
+      else if (dorm.elevatorAccess == null) unknown.push("Elevator access not verified");
     }
 
-    // Registry-aligned aliases (dimension ids as hard flags)
-    if (constraints.privateBathroom === true || constraints.requirePrivateBathroom === true) {
-      if (dormHasPrivateBath(dorm) === false) {
-        reasons.push("Does not have a private bathroom");
-      }
-    }
     if (constraints.freshmanFriendly === true) {
-      if (dorm.freshmanEligible === false) {
-        reasons.push("Not eligible for freshmen");
-      }
-    }
-    if (constraints.airConditioning === true) {
-      if (dorm.hasAC === false) reasons.push("No air conditioning");
-    }
-    if (constraints.genderInclusive === true) {
-      if (dorm.genderInclusive === false) reasons.push("Not gender-inclusive housing");
-    }
-    if (constraints.accessibility === true) {
-      if (accessibilityScore(dorm) === false) {
-        reasons.push("Accessibility features not available");
-      }
+      if (dorm.freshmanEligible === false) violate.push("Not eligible for freshmen");
+      else if (dorm.freshmanEligible == null) unknown.push("Freshman eligibility not verified");
     }
 
-    if (reasons.length > 0) {
-      excluded.push({ dorm, reasons });
+    if (violate.length > 0) {
+      excluded.push({ dorm, reasons: violate });
+    } else if (unknown.length > 0) {
+      unverified.push({ dorm, reasons: unknown });
     } else {
       eligible.push(dorm);
     }
   }
 
-  return { eligible, excluded };
+  return { eligible, excluded, unverified };
 }
 
 function confidenceLabelFromScore(confidence: number): ConfidenceLabel {

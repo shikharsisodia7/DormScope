@@ -43,7 +43,9 @@ export default async function CollegePage({ params }: { params: { slug: string }
           <h1 className="mt-1 font-display text-3xl tracking-tight md:text-4xl">{data.name}</h1>
           <p className="mt-2 text-muted-foreground">
             {dorms.length === 0
-              ? "No residence halls indexed yet."
+              ? data.housingCoverageStatus === "NO_HOUSING"
+                ? "No on-campus housing confirmed."
+                : "Housing inventory not indexed yet."
               : `${dorms.length} housing option${dorms.length === 1 ? "" : "s"}`}
           </p>
           {data.housingUrl && (
@@ -97,13 +99,21 @@ export default async function CollegePage({ params }: { params: { slug: string }
       )}
 
       <section>
-        <h2 className="font-display text-2xl tracking-tight">All dorms</h2>
+        <h2 className="font-display text-2xl tracking-tight">Housing options</h2>
         {dorms.length === 0 ? (
           <div className="mt-6 rounded-lg border border-dashed border-border bg-card/50 px-6 py-12 text-center">
-            <p className="font-medium">No halls on file for this college yet.</p>
+            <p className="font-medium">
+              {data.housingCoverageStatus === "NO_HOUSING"
+                ? "No on-campus housing confirmed for this institution."
+                : "Housing inventory not indexed yet."}
+            </p>
             <p className="mt-2 text-sm text-muted-foreground">
-              Most of the national directory is colleges only so far. Residence halls are being added
-              school-by-school from official housing pages — not invented.
+              {data.housingCoverageStatus === "NO_HOUSING"
+                ? "Authoritative sources indicate this school does not offer on-campus residential housing."
+                : "Zero indexed options means we have not finished discovery — not that the school has no dorms. Status: "}
+              {data.housingCoverageStatus !== "NO_HOUSING" && (
+                <span className="font-medium">{String(data.housingCoverageStatus).toLowerCase().replaceAll("_", " ")}</span>
+              )}
             </p>
             <div className="mt-6 flex flex-wrap justify-center gap-3">
               {data.housingUrl && (
@@ -115,7 +125,7 @@ export default async function CollegePage({ params }: { params: { slug: string }
                 <Button variant="secondary">Explore colleges</Button>
               </Link>
               <Link href="/match">
-                <Button>Try a school with halls</Button>
+                <Button>Try Match</Button>
               </Link>
             </div>
           </div>

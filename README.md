@@ -88,10 +88,25 @@ Product explanation: [/how-rankings-work](apps/web/src/app/how-rankings-work/pag
 
 ## Data ingestion
 
-1. **Institutions** — College Scorecard → `College` rows (`db:import-institutions`; CSV zip via `SCORECARD_ZIP_PATH` preferred).
+1. **Institutions** — College Scorecard import (`db:import-institutions`) loads the US college catalog.
 2. **Official hall directories** — progressive seed of known residence halls (`db:seed-halls`).
-3. **Scraper CLI** — Playwright/Cheerio against public housing pages with SSRF URL checks (`packages/scraper`). Run offline/CI workers, not on Vercel serverless.
+3. **Nationwide scraper** — discovers housing pages and extracts hall names for colleges still missing halls:
 
+```bash
+# largest ~400 schools without halls yet (enrollment ≥ 2000)
+npm run scraper:nationwide
+
+# customize
+set MIN_ENROLLMENT=1000
+set LIMIT=1000
+set CONCURRENCY=4
+npm run scraper:nationwide
+
+# single college
+npm run scraper -- university-of-california-berkeley
+```
+
+Hall attributes stay unknown unless published. Scraped halls are never auto-verified.
 Unknown attributes are stored/displayed as unknown — they are never treated as false.
 
 ## Tests
