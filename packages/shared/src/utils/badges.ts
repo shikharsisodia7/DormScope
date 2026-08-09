@@ -2,9 +2,9 @@ import type { DormBadge } from "../types";
 
 export interface DormBadgeInput {
   hasAC?: boolean | null;
-  freshmanEligible?: boolean;
+  freshmanEligible?: boolean | null;
   dormType?: string;
-  honorsHousing?: boolean;
+  honorsHousing?: boolean | null;
   bathroomStyle?: string;
   socialVibe?: number | null;
   quietVibe?: number | null;
