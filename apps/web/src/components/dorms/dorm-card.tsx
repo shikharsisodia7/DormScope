@@ -10,9 +10,12 @@ export interface DormCardData {
   yearlyCost?: number | null;
   bathroomStyle?: string;
   hasAC?: boolean | null;
-  freshmanEligible?: boolean;
+  freshmanEligible?: boolean | null;
+  upperclassEligible?: boolean | null;
   dormType?: string;
-  honorsHousing?: boolean;
+  honorsHousing?: boolean | null;
+  themedHousing?: boolean | null;
+  genderInclusive?: boolean | null;
   socialVibe?: number | null;
   quietVibe?: number | null;
   confidenceScore?: number;
