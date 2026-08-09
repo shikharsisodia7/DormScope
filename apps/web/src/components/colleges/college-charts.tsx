@@ -3,7 +3,7 @@
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from "recharts";
 import type { DormCardData } from "@/components/dorms/dorm-card";
 
-const COLORS = ["#3b82f6", "#10b981", "#f59e0b", "#8b5cf6", "#ef4444"];
+const COLORS = ["#0B6E4F", "#6B9B7A", "#D4A017", "#4A6B5C", "#8B7355"];
 
 export function CollegeCharts({ dorms }: { dorms: DormCardData[] }) {
   const bathroomDist = ["COMMUNAL", "SUITE", "PRIVATE", "UNKNOWN"].map((b) => ({

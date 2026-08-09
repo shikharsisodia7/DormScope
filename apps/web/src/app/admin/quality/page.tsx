@@ -10,7 +10,7 @@ export default async function QualityPage() {
   }
 
   return (
-    <div className="container py-10 space-y-8">
+    <div className="site-container py-10 space-y-8">
       <h1 className="text-3xl font-bold">Data quality dashboard</h1>
       {data && (
         <>

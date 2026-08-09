@@ -1,20 +1,35 @@
 # DormScope Architecture
 
+## Runtime
+
+- **Production:** Next.js on Vercel (`apps/web`) — UI + `/api/*` route handlers, Prisma → Neon Postgres.
+- **Optional:** Express (`apps/api`) for local or split deployments when `NEXT_PUBLIC_API_URL` points at it.
+- **Scraper:** CLI in `@dormscope/scraper` (Playwright + Cheerio + SSRF checks). Not deployed as Vercel serverless.
+
 ## Data flow
 
-1. **Discovery** — Generate housing-related search queries per college; prioritize `.edu` domains.
-2. **Scrape** — Playwright fetches pages; Cheerio extracts dorm names, amenities, costs.
-3. **Normalize** — Map synonyms (res hall → residence_hall, A/C → ac) in `@dormscope/shared`.
-4. **Score** — `@dormscope/scoring` computes DormScope Score and stores in `DormScore`.
-5. **Serve** — Express API exposes search, analytics, admin; Next.js renders product UI.
+1. **Institutions** — College Scorecard import (`db:import-institutions`; prefer `SCORECARD_ZIP_PATH` CSV zip).
+2. **Hall directories** — Official residence-hall seed (`db:seed-halls`), then progressive scraper ingestion.
+3. **Normalize** — Synonyms / field mapping in `@dormscope/shared`.
+4. **Rank** — `@dormscope/scoring` preference registry: hard filters → soft match score; confidence tracked separately; `algorithmVersion` on results.
+5. **Serve** — Next.js `/api` (default) or Express; product UI in `apps/web`.
 
-## Deployment
+## Ranking principles
 
-- **apps/web** → Vercel  
-- **apps/api** → Railway or Render  
-- **PostgreSQL** → Supabase or managed Postgres  
-- **Redis** → Upstash (optional, for BullMQ)  
+- Soft weights score fit; hard constraints exclude only on positive contrary evidence.
+- Missing evidence → unknown (eligible for hard checks; lowers confidence).
+- Match score and confidence are independent signals.
+
+## Deploy
+
+| Piece | Where |
+|--------|--------|
+| Web + API routes | Vercel project **dormscope** |
+| Postgres | Neon (`DATABASE_URL`) |
+| Admin mutations | `ADMIN_API_KEY` |
+| Same-origin API | `NEXT_PUBLIC_API_URL=""` |
+| Scraper / Redis jobs | Separate worker / local CLI (optional Redis/BullMQ) |
 
 ## Auth
 
-Clerk keys are optional. Guest users use `localStorage` for favorites and compare lists until Clerk is configured.
+Clerk keys optional. Guests use `localStorage` for favorites and compare lists until Clerk is configured.

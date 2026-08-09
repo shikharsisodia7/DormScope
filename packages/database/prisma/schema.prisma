@@ -1,11 +1,14 @@
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "rhel-openssl-3.0.x"]
 }
 
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
 }
+
+// ─── Enums ───────────────────────────────────────────────────────────────────
 
 enum SchoolType {
   PUBLIC
@@ -66,105 +69,234 @@ enum UserRole {
   ADMIN
 }
 
-model College {
-  id              String     @id @default(cuid())
-  name            String
-  slug            String     @unique
-  city            String
-  state           String
-  region          Region     @default(OTHER)
-  schoolType      SchoolType @default(PUBLIC)
-  websiteUrl      String?
-  housingUrl      String?
-  acceptanceRate  Float?
-  studentPopulation Int?
-  latitude        Float?
-  longitude       Float?
-  lastUpdatedAt   DateTime   @default(now())
-  createdAt       DateTime   @default(now())
-  updatedAt       DateTime   @updatedAt
+enum HousingCoverageStatus {
+  UNKNOWN
+  NO_HOUSING
+  DISCOVERY_PENDING
+  PARTIAL
+  COMPLETE
+  FAILED
+}
 
-  dorms           Dorm[]
-  sources         Source[]
-  scrapeJobs      ScrapeJob[]
-  dataQualityReports DataQualityReport[]
+enum ReviewStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  HIDDEN
+}
+
+enum ModerationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+// ─── College (Institution) ───────────────────────────────────────────────────
+
+model College {
+  id                     String                 @id @default(cuid())
+  name                   String
+  slug                   String                 @unique
+  city                   String
+  state                  String
+  region                 Region                 @default(OTHER)
+  schoolType             SchoolType             @default(PUBLIC)
+  websiteUrl             String?
+  housingUrl             String?
+  acceptanceRate         Float?
+  studentPopulation      Int?
+  latitude               Float?
+  longitude              Float?
+  lastUpdatedAt          DateTime               @default(now())
+  createdAt              DateTime               @default(now())
+  updatedAt              DateTime               @updatedAt
+
+  // National institution identifiers & coverage
+  ipedsUnitId            String?                @unique
+  opeid                  String?
+  countryCode            String                 @default("US")
+  institutionType        String?
+  hasResidentialHousing  Boolean?
+  housingCoverageStatus  HousingCoverageStatus  @default(UNKNOWN)
+  officialName           String?
+  shortName              String?
+  dataFreshnessAt        DateTime?
+
+  dorms                  Dorm[]
+  campuses               Campus[]
+  aliases                CollegeAlias[]
+  sources                Source[]
+  scrapeJobs             ScrapeJob[]
+  dataQualityReports     DataQualityReport[]
+  fieldProvenance        FieldProvenance[]
+  preferenceProfiles     PreferenceProfile[]
+  matchRuns              MatchRun[]
+  savedByUsers           SavedCollege[]
+  institutionImports     InstitutionImport[]
 
   @@index([state])
   @@index([name])
+  @@index([ipedsUnitId])
+  @@index([housingCoverageStatus])
+  @@index([countryCode, state])
 }
 
-model Dorm {
-  id                    String        @id @default(cuid())
-  name                  String
-  slug                  String
-  collegeId             String
-  college               College       @relation(fields: [collegeId], references: [id], onDelete: Cascade)
-  dormType              DormType      @default(UNKNOWN)
-  freshmanEligible      Boolean       @default(true)
-  upperclassEligible    Boolean       @default(true)
-  honorsHousing         Boolean       @default(false)
-  themedHousing         Boolean       @default(false)
-  genderInclusive       Boolean       @default(false)
-  bathroomStyle         BathroomStyle @default(UNKNOWN)
-  hasAC                 Boolean?
-  hasHeating            Boolean?
-  laundryAccess         Boolean?
-  kitchenAccess         Boolean?
-  elevatorAccess        Boolean?
-  studyLounges          Boolean?
-  socialVibe           Float?        // 0-10
-  quietVibe             Float?
-  cleanlinessRating     Float?
-  privacyRating         Float?
-  safetyNotes           String?
-  diningDistanceMeters  Int?
-  gymDistanceMeters     Int?
-  classroomDistanceMeters Int?
-  campusZone            String?
-  buildingAge           Int?
-  renovationYear        Int?
-  officialHousingUrl    String?
-  imageUrl              String?
-  virtualTourUrl        String?
-  floorPlanUrl          String?
-  yearlyCost            Float?
-  semesterCost          Float?
-  confidenceScore       Float         @default(0.5)
-  dataCompletenessScore Float         @default(0)
-  latitude              Float?
-  longitude             Float?
-  lastUpdatedAt         DateTime      @default(now())
-  verifiedAt            DateTime?
-  isVerified            Boolean       @default(false)
-  duplicateOfId         String?
-  createdAt             DateTime      @default(now())
-  updatedAt             DateTime      @updatedAt
+model CollegeAlias {
+  id        String   @id @default(cuid())
+  collegeId String
+  college   College  @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  alias     String
+  createdAt DateTime @default(now())
 
-  roomTypes             RoomType[]
-  dormAmenities         DormAmenity[]
-  housingCosts          HousingCost[]
-  sources               Source[]
-  reviewSummaries       ReviewSummary[]
-  dormScore             DormScore?
-  favorites             FavoriteDorm[]
-  comparisonItems       ComparisonItem[]
+  @@unique([collegeId, alias])
+  @@index([alias])
+  @@index([collegeId])
+}
+
+// ─── Campus ──────────────────────────────────────────────────────────────────
+
+model Campus {
+  id         String   @id @default(cuid())
+  collegeId  String
+  college    College  @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  name       String
+  slug       String
+  city       String?
+  state      String?
+  latitude   Float?
+  longitude  Float?
+  isPrimary  Boolean  @default(false)
+  websiteUrl String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  dorms      Dorm[]
 
   @@unique([collegeId, slug])
   @@index([collegeId])
   @@index([name])
 }
 
+// ─── Dorm ────────────────────────────────────────────────────────────────────
+
+model Dorm {
+  id                      String         @id @default(cuid())
+  name                    String
+  slug                    String
+  collegeId               String
+  college                 College        @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  dormType                DormType       @default(UNKNOWN)
+  freshmanEligible        Boolean        @default(true)
+  upperclassEligible      Boolean        @default(true)
+  honorsHousing           Boolean        @default(false)
+  themedHousing           Boolean        @default(false)
+  genderInclusive         Boolean        @default(false)
+  bathroomStyle           BathroomStyle  @default(UNKNOWN)
+  hasAC                   Boolean?
+  hasHeating              Boolean?
+  laundryAccess           Boolean?
+  kitchenAccess           Boolean?
+  elevatorAccess          Boolean?
+  studyLounges            Boolean?
+  socialVibe              Float?
+  quietVibe               Float?
+  cleanlinessRating       Float?
+  privacyRating           Float?
+  safetyNotes             String?
+  diningDistanceMeters    Int?
+  gymDistanceMeters       Int?
+  classroomDistanceMeters Int?
+  campusZone              String?
+  buildingAge             Int?
+  renovationYear          Int?
+  officialHousingUrl      String?
+  imageUrl                String?
+  virtualTourUrl          String?
+  floorPlanUrl            String?
+  yearlyCost              Float?
+  semesterCost            Float?
+  confidenceScore         Float          @default(0.5)
+  dataCompletenessScore   Float          @default(0)
+  latitude                Float?
+  longitude               Float?
+  lastUpdatedAt           DateTime       @default(now())
+  verifiedAt              DateTime?
+  isVerified              Boolean        @default(false)
+  duplicateOfId           String?
+  createdAt               DateTime       @default(now())
+  updatedAt               DateTime       @updatedAt
+
+  // Campus link & aliases
+  campusId                String?
+  campus                  Campus?        @relation(fields: [campusId], references: [id], onDelete: SetNull)
+  aliases                 DormAlias[]
+
+  // Eligibility / configuration (null = unknown)
+  graduateEligible        Boolean?
+  genderConfiguration     String?
+  hallStyleNotes          String?
+  wheelchairAccessible    Boolean?
+  accessibilityFeatures   Json?
+  substanceFree           Boolean?
+  quietHousing            Boolean?
+  livingLearning          Boolean?
+  constructedYear         Int?
+  floors                  Int?
+  approximateResidents    Int?
+  description             String?
+  isActive                Boolean        @default(true)
+  effectiveFrom           DateTime?
+  effectiveTo             DateTime?
+  mealPlanRequired        Boolean?
+  address                 String?
+
+  roomTypes               RoomType[]
+  dormAmenities           DormAmenity[]
+  housingCosts            HousingCost[]
+  sources                 Source[]
+  reviewSummaries         ReviewSummary[]
+  reviews                 Review[]
+  dormScore               DormScore?
+  favorites               FavoriteDorm[]
+  comparisonItems         ComparisonItem[]
+  fieldProvenance         FieldProvenance[]
+  dataCorrections         DataCorrection[]
+  matchResults            MatchResult[]
+
+  @@unique([collegeId, slug])
+  @@index([collegeId])
+  @@index([name])
+  @@index([collegeId, name])
+  @@index([campusId])
+  @@index([isActive])
+  @@index([isVerified])
+}
+
+model DormAlias {
+  id        String   @id @default(cuid())
+  dormId    String
+  dorm      Dorm     @relation(fields: [dormId], references: [id], onDelete: Cascade)
+  alias     String
+  createdAt DateTime @default(now())
+
+  @@unique([dormId, alias])
+  @@index([alias])
+  @@index([dormId])
+}
+
+// ─── Room / Amenity / Cost ───────────────────────────────────────────────────
+
 model RoomType {
-  id          String   @id @default(cuid())
-  dormId      String
-  dorm        Dorm     @relation(fields: [dormId], references: [id], onDelete: Cascade)
-  name        String
-  normalized  String
-  capacity    Int?
-  description String?
-  yearlyCost  Float?
+  id           String  @id @default(cuid())
+  dormId       String
+  dorm         Dorm    @relation(fields: [dormId], references: [id], onDelete: Cascade)
+  name         String
+  normalized   String
+  capacity     Int?
+  description  String?
+  yearlyCost   Float?
   semesterCost Float?
-  confidence  Float    @default(0.5)
+  confidence   Float   @default(0.5)
 
   @@index([dormId])
 }
@@ -180,32 +312,34 @@ model Amenity {
 }
 
 model DormAmenity {
-  id         String   @id @default(cuid())
+  id         String  @id @default(cuid())
   dormId     String
-  dorm       Dorm     @relation(fields: [dormId], references: [id], onDelete: Cascade)
+  dorm       Dorm    @relation(fields: [dormId], references: [id], onDelete: Cascade)
   amenityId  String
-  amenity    Amenity  @relation(fields: [amenityId], references: [id], onDelete: Cascade)
-  confidence Float    @default(0.5)
+  amenity    Amenity @relation(fields: [amenityId], references: [id], onDelete: Cascade)
+  confidence Float   @default(0.5)
   sourceNote String?
 
   @@unique([dormId, amenityId])
 }
 
 model HousingCost {
-  id            String   @id @default(cuid())
-  dormId        String
-  dorm          Dorm     @relation(fields: [dormId], references: [id], onDelete: Cascade)
-  label         String
-  amount        Float
-  period        String   // yearly, semester, monthly, room_board
-  academicYear  String?
-  confidence    Float    @default(0.5)
-  isUncertain   Boolean  @default(false)
-  sourceUrl     String?
-  createdAt     DateTime @default(now())
+  id           String   @id @default(cuid())
+  dormId       String
+  dorm         Dorm     @relation(fields: [dormId], references: [id], onDelete: Cascade)
+  label        String
+  amount       Float
+  period       String
+  academicYear String?
+  confidence   Float    @default(0.5)
+  isUncertain  Boolean  @default(false)
+  sourceUrl    String?
+  createdAt    DateTime @default(now())
 
   @@index([dormId])
 }
+
+// ─── Sources & Provenance ────────────────────────────────────────────────────
 
 model Source {
   id          String     @id @default(cuid())
@@ -222,26 +356,121 @@ model Source {
   rawSnippet  String?
   createdAt   DateTime   @default(now())
 
+  fieldProvenance FieldProvenance[]
+
   @@index([collegeId])
   @@index([dormId])
 }
 
+model FieldProvenance {
+  id            String   @id @default(cuid())
+  dormId        String?
+  dorm          Dorm?    @relation(fields: [dormId], references: [id], onDelete: Cascade)
+  collegeId     String?
+  college       College? @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  fieldName     String
+  valueSnapshot String?
+  sourceId      String?
+  source        Source?  @relation(fields: [sourceId], references: [id], onDelete: SetNull)
+  sourceUrl     String?
+  retrievalAt   DateTime @default(now())
+  confidence    Float    @default(0.5)
+  verified      Boolean  @default(false)
+  createdAt     DateTime @default(now())
+
+  @@index([dormId])
+  @@index([collegeId])
+  @@index([fieldName])
+  @@index([dormId, fieldName])
+  @@index([sourceId])
+}
+
+// ─── Reviews (student-submitted) ─────────────────────────────────────────────
+
+model Review {
+  id                   String       @id @default(cuid())
+  dormId               String
+  dorm                 Dorm         @relation(fields: [dormId], references: [id], onDelete: Cascade)
+  userId               String?
+  user                 User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+  sessionId            String?
+  overallRating        Float
+  categoryRatings      Json?
+  schoolYear           String?
+  classYearLived       String?
+  roomTypeLived        String?
+  pros                 String?
+  cons                 String?
+  advice               String?
+  body                 String?
+  status               ReviewStatus @default(PENDING)
+  affiliationVerified  Boolean      @default(false)
+  createdAt            DateTime     @default(now())
+  updatedAt            DateTime     @updatedAt
+  moderatedAt          DateTime?
+  ipHash               String?
+
+  reports              ReviewReport[]
+
+  @@index([dormId])
+  @@index([dormId, status])
+  @@index([userId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model ReviewReport {
+  id        String           @id @default(cuid())
+  reviewId  String
+  review    Review           @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+  reason    String
+  details   String?
+  status    ModerationStatus @default(PENDING)
+  createdAt DateTime         @default(now())
+
+  @@index([reviewId])
+  @@index([status])
+}
+
+/// Aggregated / generated review summaries (compat — not fabricated seed data).
 model ReviewSummary {
-  id              String   @id @default(cuid())
-  dormId          String
-  dorm            Dorm     @relation(fields: [dormId], references: [id], onDelete: Cascade)
-  sentiment       String?
-  vibeLabels      String[] // social, quiet, party-heavy, etc.
-  pros            String[]
-  cons            String[]
+  id               String   @id @default(cuid())
+  dormId           String
+  dorm             Dorm     @relation(fields: [dormId], references: [id], onDelete: Cascade)
+  sentiment        String?
+  vibeLabels       String[]
+  pros             String[]
+  cons             String[]
   ruleBasedSummary String?
-  aiSummary       String?
-  confidence      Float    @default(0.3)
-  sourceCount     Int      @default(0)
-  lastUpdatedAt   DateTime @default(now())
+  aiSummary        String?
+  confidence       Float    @default(0.3)
+  sourceCount      Int      @default(0)
+  lastUpdatedAt    DateTime @default(now())
 
   @@index([dormId])
 }
+
+// ─── Data Corrections ────────────────────────────────────────────────────────
+
+model DataCorrection {
+  id            String           @id @default(cuid())
+  dormId        String
+  dorm          Dorm             @relation(fields: [dormId], references: [id], onDelete: Cascade)
+  fieldName     String
+  proposedValue String
+  sourceUrl     String?
+  status        ModerationStatus @default(PENDING)
+  submitterNote String?
+  userId        String?
+  user          User?            @relation(fields: [userId], references: [id], onDelete: SetNull)
+  createdAt     DateTime         @default(now())
+
+  @@index([dormId])
+  @@index([status])
+  @@index([userId])
+}
+
+// ─── Scores ──────────────────────────────────────────────────────────────────
 
 model DormScore {
   id                  String   @id @default(cuid())
@@ -260,34 +489,73 @@ model DormScore {
   calculatedAt        DateTime @default(now())
 }
 
-model ScrapeJob {
-  id          String          @id @default(cuid())
-  collegeId   String
-  college     College         @relation(fields: [collegeId], references: [id], onDelete: Cascade)
-  status      ScrapeJobStatus @default(PENDING)
-  startedAt   DateTime?
-  completedAt DateTime?
-  errorMessage String?
-  candidateUrls String[]
-  dormsFound  Int             @default(0)
-  createdAt   DateTime        @default(now())
-  updatedAt   DateTime        @updatedAt
+// ─── Ingestion / Scraping ────────────────────────────────────────────────────
 
-  logs        ScrapeLog[]
+model ScrapeJob {
+  id            String          @id @default(cuid())
+  collegeId     String
+  college       College         @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  status        ScrapeJobStatus @default(PENDING)
+  startedAt     DateTime?
+  completedAt   DateTime?
+  errorMessage  String?
+  candidateUrls String[]
+  dormsFound    Int             @default(0)
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  // IngestionJob extensions
+  stage         String?
+  retryCount    Int             @default(0)
+  lastError     String?
+  contentHash   String?
+  resumedFromId String?
+  resumedFrom   ScrapeJob?      @relation("ScrapeJobResume", fields: [resumedFromId], references: [id], onDelete: SetNull)
+  resumes       ScrapeJob[]     @relation("ScrapeJobResume")
+
+  logs          ScrapeLog[]
+
+  @@index([collegeId])
+  @@index([status])
+  @@index([contentHash])
 }
 
 model ScrapeLog {
-  id          String   @id @default(cuid())
-  jobId       String
-  job         ScrapeJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
-  level       String   // info, warn, error
-  message     String
-  url         String?
-  metadata    Json?
-  createdAt   DateTime @default(now())
+  id        String    @id @default(cuid())
+  jobId     String
+  job       ScrapeJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  level     String
+  message   String
+  url       String?
+  metadata  Json?
+  createdAt DateTime  @default(now())
 
   @@index([jobId])
 }
+
+/// High-level institution import tracking (IPEDS / bulk loads).
+model InstitutionImport {
+  id           String          @id @default(cuid())
+  collegeId    String?
+  college      College?        @relation(fields: [collegeId], references: [id], onDelete: SetNull)
+  sourceLabel  String
+  status       ScrapeJobStatus @default(PENDING)
+  stage        String?
+  retryCount   Int             @default(0)
+  lastError    String?
+  contentHash  String?
+  recordCount  Int             @default(0)
+  startedAt    DateTime?
+  completedAt  DateTime?
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+
+  @@index([collegeId])
+  @@index([status])
+  @@index([contentHash])
+}
+
+// ─── Users & Favorites ───────────────────────────────────────────────────────
 
 model User {
   id            String   @id @default(cuid())
@@ -302,6 +570,24 @@ model User {
   favorites             FavoriteDorm[]
   comparisonLists       ComparisonList[]
   recommendationProfile RecommendationProfile?
+  preferenceProfiles    PreferenceProfile[]
+  savedColleges         SavedCollege[]
+  reviews               Review[]
+  dataCorrections       DataCorrection[]
+}
+
+model SavedCollege {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  collegeId String
+  college   College  @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  notes     String?
+  createdAt DateTime @default(now())
+
+  @@unique([userId, collegeId])
+  @@index([userId])
+  @@index([collegeId])
 }
 
 model FavoriteDorm {
@@ -329,50 +615,120 @@ model ComparisonList {
 }
 
 model ComparisonItem {
-  id         String         @id @default(cuid())
-  listId     String
-  list       ComparisonList @relation(fields: [listId], references: [id], onDelete: Cascade)
-  dormId     String
-  dorm       Dorm           @relation(fields: [dormId], references: [id], onDelete: Cascade)
-  sortOrder  Int            @default(0)
+  id        String         @id @default(cuid())
+  listId    String
+  list      ComparisonList @relation(fields: [listId], references: [id], onDelete: Cascade)
+  dormId    String
+  dorm      Dorm           @relation(fields: [dormId], references: [id], onDelete: Cascade)
+  sortOrder Int            @default(0)
 
   @@unique([listId, dormId])
 }
 
+// ─── Preferences & Matching ──────────────────────────────────────────────────
+
+/// Legacy single-profile quiz answers (kept for backward compatibility).
 model RecommendationProfile {
-  id                String   @id @default(cuid())
-  userId            String   @unique
-  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  isFreshman        Boolean?
-  prefersSocial     Boolean?
-  prefersQuiet      Boolean?
-  priorityPrice     Float?
-  priorityComfort   Float?
-  priorityPrivacy   Float?
-  priorityLocation  Float?
-  wantsAC           Boolean?
+  id                 String   @id @default(cuid())
+  userId             String   @unique
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  isFreshman         Boolean?
+  prefersSocial      Boolean?
+  prefersQuiet       Boolean?
+  priorityPrice      Float?
+  priorityComfort    Float?
+  priorityPrivacy    Float?
+  priorityLocation   Float?
+  wantsAC            Boolean?
   bathroomPreference String?
-  nearDining        Boolean?
-  apartmentStyle    Boolean?
-  honorsThemed      Boolean?
-  studyLounges      Boolean?
-  cheapestVsBestFit String?
-  quizAnswers       Json?
-  updatedAt         DateTime @updatedAt
+  nearDining         Boolean?
+  apartmentStyle     Boolean?
+  honorsThemed       Boolean?
+  studyLounges       Boolean?
+  cheapestVsBestFit  String?
+  quizAnswers        Json?
+  updatedAt          DateTime @updatedAt
 }
 
+/// Multi-profile preference store for personalized ranking.
+model PreferenceProfile {
+  id               String   @id @default(cuid())
+  userId           String?
+  user             User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sessionId        String?
+  name             String   @default("Default")
+  collegeId        String?
+  college          College? @relation(fields: [collegeId], references: [id], onDelete: SetNull)
+  weights          Json
+  hardConstraints  Json
+  quickAnswers     Json?
+  algorithmVersion String   @default("1")
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  matchRuns        MatchRun[]
+
+  @@index([userId])
+  @@index([sessionId])
+  @@index([collegeId])
+}
+
+model MatchRun {
+  id               String             @id @default(cuid())
+  profileId        String?
+  profile          PreferenceProfile? @relation(fields: [profileId], references: [id], onDelete: SetNull)
+  collegeId        String
+  college          College            @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  weights          Json
+  hardConstraints  Json
+  algorithmVersion String             @default("1")
+  usefulFeedback   Boolean?
+  createdAt        DateTime           @default(now())
+  shareToken       String?            @unique
+
+  results          MatchResult[]
+
+  @@index([profileId])
+  @@index([collegeId])
+  @@index([createdAt])
+}
+
+model MatchResult {
+  id               String   @id @default(cuid())
+  matchRunId       String
+  matchRun         MatchRun @relation(fields: [matchRunId], references: [id], onDelete: Cascade)
+  dormId           String
+  dorm             Dorm     @relation(fields: [dormId], references: [id], onDelete: Cascade)
+  rank             Int
+  matchScore       Float
+  confidence       Float    @default(0.5)
+  reasons          Json
+  excluded         Boolean  @default(false)
+  exclusionReasons String[]
+
+  @@unique([matchRunId, dormId])
+  @@index([matchRunId])
+  @@index([dormId])
+  @@index([matchRunId, rank])
+}
+
+// ─── Data Quality ────────────────────────────────────────────────────────────
+
 model DataQualityReport {
-  id                  String   @id @default(cuid())
-  collegeId           String?
-  college             College? @relation(fields: [collegeId], references: [id], onDelete: SetNull)
-  state               String?
-  totalDorms          Int      @default(0)
-  missingCost         Int      @default(0)
-  missingAmenities    Int      @default(0)
-  missingSources      Int      @default(0)
-  lowConfidenceCount  Int      @default(0)
-  duplicateWarnings   Int      @default(0)
-  staleRecords        Int      @default(0)
-  avgCompleteness     Float    @default(0)
-  generatedAt         DateTime @default(now())
+  id                 String   @id @default(cuid())
+  collegeId          String?
+  college            College? @relation(fields: [collegeId], references: [id], onDelete: SetNull)
+  state              String?
+  totalDorms         Int      @default(0)
+  missingCost        Int      @default(0)
+  missingAmenities   Int      @default(0)
+  missingSources     Int      @default(0)
+  lowConfidenceCount Int      @default(0)
+  duplicateWarnings  Int      @default(0)
+  staleRecords       Int      @default(0)
+  avgCompleteness    Float    @default(0)
+  generatedAt        DateTime @default(now())
+
+  @@index([collegeId])
+  @@index([state])
 }

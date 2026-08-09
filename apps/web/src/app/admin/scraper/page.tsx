@@ -10,7 +10,7 @@ export default async function ScraperAdminPage() {
   }
 
   return (
-    <div className="container py-10 space-y-6">
+    <div className="site-container py-10 space-y-6">
       <h1 className="text-3xl font-bold">Scraper dashboard</h1>
       <p className="text-muted-foreground">Run scrapes, review logs, approve sources, verify dorms.</p>
       <ScraperDashboard initialJobs={jobs as never[]} />

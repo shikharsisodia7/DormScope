@@ -2,20 +2,18 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Building2, Moon, Sun, Menu } from "lucide-react";
+import { Menu, Moon, Sun, X } from "lucide-react";
 import { useTheme } from "next-themes";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useState } from "react";
 
 const nav = [
-  { href: "/colleges", label: "Colleges" },
-  { href: "/dorms", label: "Dorms" },
+  { href: "/colleges", label: "Explore" },
+  { href: "/match", label: "Match" },
   { href: "/compare", label: "Compare" },
-  { href: "/quiz", label: "Quiz" },
-  { href: "/map", label: "Map" },
-  { href: "/analytics", label: "Analytics" },
-  { href: "/about", label: "About" },
+  { href: "/saved", label: "Saved" },
+  { href: "/#how-it-works", label: "How it works" },
 ];
 
 export function Header() {
@@ -23,34 +21,40 @@ export function Header() {
   const { theme, setTheme } = useTheme();
   const [open, setOpen] = useState(false);
 
+  function isActive(href: string) {
+    if (href.startsWith("/#")) return pathname === "/";
+    if (href === "/colleges") return pathname.startsWith("/colleges");
+    return pathname === href || pathname.startsWith(`${href}/`);
+  }
+
   return (
-    <header className="sticky top-0 z-50 border-b bg-background/80 backdrop-blur-md">
-      <div className="container mx-auto flex h-16 items-center justify-between px-4">
-        <Link href="/" className="flex items-center gap-2 font-bold text-xl">
-          <Building2 className="h-6 w-6 text-primary" />
+    <header className="sticky top-0 z-50 border-b border-border/70 bg-background/95 backdrop-blur-sm">
+      <div className="site-container flex h-16 items-center justify-between gap-4">
+        <Link href="/" className="font-display text-xl tracking-tight text-forest sm:text-2xl">
           DormScope
         </Link>
-        <nav className="hidden md:flex items-center gap-6 text-sm">
+
+        <nav className="hidden items-center gap-1 lg:flex" aria-label="Primary">
           {nav.map((item) => (
             <Link
               key={item.href}
               href={item.href}
               className={cn(
-                "hover:text-primary transition-colors",
-                pathname === item.href && "text-primary font-medium"
+                "rounded-md px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground",
+                isActive(item.href) && "font-medium text-primary"
               )}
             >
               {item.label}
             </Link>
           ))}
-          <Link href="/saved" className="hover:text-primary">
-            Saved
-          </Link>
-          <Link href="/admin" className="text-muted-foreground hover:text-primary">
-            Admin
-          </Link>
         </nav>
+
         <div className="flex items-center gap-2">
+          <Link href="/match" className="hidden sm:block">
+            <Button size="sm" className="font-medium">
+              Find My Best Dorm
+            </Button>
+          </Link>
           <Button
             variant="ghost"
             size="icon"
@@ -60,20 +64,40 @@ export function Header() {
             <Sun className="h-5 w-5 rotate-0 scale-100 transition-all dark:-rotate-90 dark:scale-0" />
             <Moon className="absolute h-5 w-5 rotate-90 scale-0 transition-all dark:rotate-0 dark:scale-100" />
           </Button>
-          <Button variant="ghost" size="icon" className="md:hidden" onClick={() => setOpen(!open)}>
-            <Menu className="h-5 w-5" />
+          <Button
+            variant="ghost"
+            size="icon"
+            className="lg:hidden"
+            onClick={() => setOpen((v) => !v)}
+            aria-expanded={open}
+            aria-controls="mobile-nav"
+            aria-label={open ? "Close menu" : "Open menu"}
+          >
+            {open ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
           </Button>
         </div>
       </div>
+
       {open && (
-        <div className="md:hidden border-t px-4 py-3 flex flex-col gap-2">
-          {nav.map((item) => (
-            <Link key={item.href} href={item.href} onClick={() => setOpen(false)}>
-              {item.label}
+        <div id="mobile-nav" className="border-t border-border/70 lg:hidden">
+          <nav className="site-container flex flex-col gap-1 py-3" aria-label="Mobile">
+            {nav.map((item) => (
+              <Link
+                key={item.href}
+                href={item.href}
+                onClick={() => setOpen(false)}
+                className={cn(
+                  "rounded-md px-3 py-2.5 text-sm",
+                  isActive(item.href) ? "bg-accent font-medium text-primary" : "text-foreground"
+                )}
+              >
+                {item.label}
+              </Link>
+            ))}
+            <Link href="/match" onClick={() => setOpen(false)} className="mt-2">
+              <Button className="w-full">Find My Best Dorm</Button>
             </Link>
-          ))}
-          <Link href="/saved" onClick={() => setOpen(false)}>Saved</Link>
-          <Link href="/admin" onClick={() => setOpen(false)}>Admin</Link>
+          </nav>
         </div>
       )}
     </header>

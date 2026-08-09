@@ -10,7 +10,7 @@ export default async function AnalyticsPage() {
   }
 
   return (
-    <div className="container py-10 space-y-8">
+    <div className="site-container space-y-8 py-10">
       <div>
         <h1 className="text-3xl font-bold">National dorm analytics</h1>
         <p className="text-muted-foreground mt-2">Trends across indexed U.S. college housing data.</p>

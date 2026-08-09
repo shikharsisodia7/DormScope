@@ -81,7 +81,7 @@ export function parsePageMetadata(html: string): { title: string; links: string[
       links.push(href);
     }
   });
-  return { title, links: [...new Set(links)].slice(0, 30) };
+  return { title, links: Array.from(new Set(links)).slice(0, 30) };
 }
 
 export { normalizeBathroom };

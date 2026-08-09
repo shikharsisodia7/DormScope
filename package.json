@@ -16,7 +16,11 @@
     "db:migrate": "npm run migrate --workspace=@dormscope/database",
     "db:seed": "npm run seed --workspace=@dormscope/database",
     "db:studio": "npm run studio --workspace=@dormscope/database",
+    "db:import-institutions": "npm run import:institutions --workspace=@dormscope/database",
+    "db:seed-halls": "npm run seed:halls --workspace=@dormscope/database",
+    "db:coverage": "npm run coverage --workspace=@dormscope/database",
     "scraper": "npm run start --workspace=@dormscope/scraper",
+    "scraper:ingest-sample": "npm run ingest:sample --workspace=@dormscope/scraper",
     "lint": "turbo run lint"
   },
   "devDependencies": {

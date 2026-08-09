@@ -22,7 +22,7 @@ export default async function AdminPage() {
   ];
 
   return (
-    <div className="container py-10 space-y-8">
+    <div className="site-container py-10 space-y-8">
       <h1 className="text-3xl font-bold">Admin dashboard</h1>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         {stats.map((s) => (
@@ -37,7 +37,7 @@ export default async function AdminPage() {
       <div className="flex gap-4">
         <Link href="/admin/scraper" className="text-primary hover:underline">Scraper dashboard →</Link>
         <Link href="/admin/quality" className="text-primary hover:underline">Data quality →</Link>
-        <a href={`${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000"}/api/admin/export`} className="text-primary hover:underline">
+        <a href={`${process.env.NEXT_PUBLIC_API_URL || ""}/api/admin/export`} className="text-primary hover:underline">
           Export dataset
         </a>
       </div>

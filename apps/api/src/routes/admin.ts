@@ -1,11 +1,40 @@
 import { Router } from "express";
+import { z } from "zod";
 import { prisma } from "@dormscope/database";
 import { fuzzyDormNameMatch } from "@dormscope/shared";
+import { requireAdminKey } from "../middleware/adminAuth.js";
+import { asyncHandler } from "../middleware/errorHandler.js";
 
 export const adminRouter = Router();
 
-adminRouter.get("/overview", async (_req, res) => {
-  try {
+adminRouter.post(
+  "/login",
+  asyncHandler(async (req, res) => {
+    const expected = process.env.ADMIN_API_KEY;
+    if (!expected) return res.status(503).json({ error: "Admin auth not configured" });
+    const body = z.object({ apiKey: z.string().optional() }).safeParse(req.body ?? {});
+    const header =
+      (req.headers["x-admin-key"] as string | undefined) ??
+      (typeof req.headers.authorization === "string"
+        ? req.headers.authorization.replace(/^Bearer\s+/i, "")
+        : undefined);
+    const key = header || body.data?.apiKey;
+    if (!key || key !== expected) return res.status(401).json({ error: "Invalid admin key" });
+    res.json({ ok: true, message: "Admin key accepted. Send x-admin-key on mutating admin routes." });
+  })
+);
+
+adminRouter.get(
+  "/overview",
+  asyncHandler(async (req, res) => {
+    if (process.env.ADMIN_API_KEY) {
+      // soft-require when configured
+      const header = req.headers["x-admin-key"];
+      if (header !== process.env.ADMIN_API_KEY) {
+        return res.status(401).json({ error: "Unauthorized" });
+      }
+    }
+
     const [
       colleges,
       dorms,
@@ -63,20 +92,60 @@ adminRouter.get("/overview", async (_req, res) => {
       staleRecords: stale,
       failedJobs,
     });
-  } catch (e) {
-    res.status(500).json({ error: (e as Error).message });
-  }
-});
+  })
+);
 
-adminRouter.get("/export", async (_req, res) => {
-  try {
+adminRouter.get(
+  "/export",
+  requireAdminKey,
+  asyncHandler(async (_req, res) => {
     const data = await prisma.dorm.findMany({
-      include: { college: true, dormScore: true, dormAmenities: { include: { amenity: true } } },
+      include: {
+        college: { select: { name: true, slug: true, state: true } },
+        dormScore: true,
+        dormAmenities: { include: { amenity: true } },
+      },
+      take: 5000,
     });
     res.setHeader("Content-Type", "application/json");
     res.setHeader("Content-Disposition", "attachment; filename=dormscope-export.json");
     res.json(data);
-  } catch (e) {
-    res.status(500).json({ error: (e as Error).message });
-  }
-});
+  })
+);
+
+adminRouter.get(
+  "/coverage",
+  requireAdminKey,
+  asyncHandler(async (_req, res) => {
+    const [colleges, dorms, withHousingUrl, byStatus, verifiedDorms] = await Promise.all([
+      prisma.college.count(),
+      prisma.dorm.count(),
+      prisma.college.count({ where: { housingUrl: { not: null } } }),
+      prisma.college.groupBy({ by: ["housingCoverageStatus"], _count: true }),
+      prisma.dorm.count({ where: { isVerified: true } }),
+    ]);
+    res.json({
+      colleges,
+      dorms,
+      withHousingUrl,
+      verifiedDorms,
+      housingCoverageStatus: Object.fromEntries(
+        byStatus.map((r) => [r.housingCoverageStatus, r._count])
+      ),
+    });
+  })
+);
+
+adminRouter.patch(
+  "/reviews/:id",
+  requireAdminKey,
+  asyncHandler(async (req, res) => {
+    const status = z.enum(["APPROVED", "REJECTED", "HIDDEN", "PENDING"]).parse(req.body.status);
+    const review = await prisma.review.update({
+      where: { id: req.params.id },
+      data: { status, moderatedAt: new Date() },
+      select: { id: true, status: true, moderatedAt: true },
+    });
+    res.json({ review });
+  })
+);

@@ -1,9 +1,8 @@
 import Link from "next/link";
-import { Search, BarChart3, Map, Scale, Sparkles, DollarSign, Building } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { HomeSearch } from "@/components/home/home-search";
-import { fetchApi } from "@/lib/utils";
+import { SectionReveal } from "@/components/ui/section-reveal";
+import { prisma } from "@/lib/prisma";
 
 interface Stats {
   totalColleges: number;
@@ -13,115 +12,196 @@ interface Stats {
   statesCovered: number;
 }
 
-async function getStats(): Promise<Stats> {
+interface CollegeItem {
+  id: string;
+  name: string;
+  slug: string;
+  city: string;
+  state: string;
+  dormCount?: number;
+}
+
+async function getStats(): Promise<Stats | null> {
   try {
-    return await fetchApi<Stats>("/api/stats");
+    const [colleges, dorms, sources, confidence, states] = await Promise.all([
+      prisma.college.count(),
+      prisma.dorm.count(),
+      prisma.source.count(),
+      prisma.dorm.aggregate({ _avg: { confidenceScore: true } }),
+      prisma.college.findMany({ select: { state: true }, distinct: ["state"] }),
+    ]);
+    return {
+      totalColleges: colleges,
+      totalDorms: dorms,
+      totalSources: sources,
+      avgConfidence: Math.round((confidence._avg.confidenceScore ?? 0) * 100),
+      statesCovered: states.length,
+    };
   } catch {
-    return { totalColleges: 5, totalDorms: 14, totalSources: 5, avgConfidence: 88, statesCovered: 5 };
+    return null;
   }
 }
 
-export default async function HomePage() {
-  const stats = await getStats();
+async function getFeaturedColleges(): Promise<CollegeItem[]> {
+  try {
+    const rows = await prisma.college.findMany({
+      where: { dorms: { some: {} } },
+      include: { _count: { select: { dorms: true } } },
+      orderBy: { name: "asc" },
+      take: 6,
+    });
+    return rows.slice(0, 3).map((c) => ({
+      id: c.id,
+      name: c.name,
+      slug: c.slug,
+      city: c.city,
+      state: c.state,
+      dormCount: c._count.dorms,
+    }));
+  } catch {
+    return [];
+  }
+}
 
-  const features = [
-    { href: "/compare", icon: Scale, title: "Compare dorms", desc: "Side-by-side up to 4 dorms" },
-    { href: "/dorms?freshmanOnly=true", icon: Building, title: "Freshman housing", desc: "Best halls for first-years" },
-    { href: "/dorms", icon: Sparkles, title: "Search by amenities", desc: "AC, suite baths, laundry & more" },
-    { href: "/analytics", icon: DollarSign, title: "View dorm costs", desc: "National cost trends by state" },
-    { href: "/map", icon: Map, title: "Explore housing maps", desc: "Colleges across the U.S." },
-    { href: "/quiz", icon: BarChart3, title: "Dorm-fit quiz", desc: "Personalized recommendations" },
-  ];
+const steps = [
+  {
+    n: "01",
+    title: "Choose your college",
+    body: "Search by name or nickname. We only rank halls for the school you pick.",
+  },
+  {
+    n: "02",
+    title: "Say what matters",
+    body: "Social vibe, quiet, space, private bath, AC, cost, location — set soft weights or hard requirements.",
+  },
+  {
+    n: "03",
+    title: "Get dorms ranked for you",
+    body: "See match percent, confidence, reasons, and tradeoffs. Fine-tune and re-rank anytime.",
+  },
+];
+
+export default async function HomePage() {
+  const [stats, featured] = await Promise.all([getStats(), getFeaturedColleges()]);
 
   return (
     <div>
-      <section className="relative overflow-hidden border-b bg-gradient-to-b from-primary/5 to-background py-20 md:py-28">
-        <div className="container text-center space-y-8">
-          <h1 className="text-4xl md:text-6xl font-bold tracking-tight max-w-4xl mx-auto">
-            Search any college dorm in the U.S.
+      <section className="campus-hero relative overflow-hidden border-b border-border/60">
+        <div className="site-container flex min-h-[min(88vh,720px)] flex-col justify-center py-16 md:py-24">
+          <p className="fade-up font-display text-4xl tracking-tight text-forest sm:text-5xl md:text-6xl">
+            DormScope
+          </p>
+          <h1 className="fade-up fade-up-delay-1 mt-5 max-w-2xl font-display text-3xl leading-tight tracking-tight text-foreground sm:text-4xl md:text-[2.75rem]">
+            Find the dorm that fits how you want to live.
           </h1>
-          <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
-            DormScope collects public housing data, scores every residence hall, and helps you compare
-            costs, amenities, and fit — like Zillow for college dorms.
+          <p className="fade-up fade-up-delay-2 mt-4 max-w-lg text-base text-muted-foreground sm:text-lg">
+            Choose your college → say what matters → get dorms ranked for you.
           </p>
-          <HomeSearch />
-        </div>
-      </section>
-
-      <section className="container py-12">
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-          {[
-            { label: "Colleges indexed", value: stats.totalColleges },
-            { label: "Dorms indexed", value: stats.totalDorms },
-            { label: "Sources scanned", value: stats.totalSources },
-            { label: "Avg confidence", value: `${stats.avgConfidence}%` },
-            { label: "States covered", value: stats.statesCovered },
-          ].map((s) => (
-            <Card key={s.label}>
-              <CardContent className="pt-6 text-center">
-                <p className="text-3xl font-bold text-primary">{s.value}</p>
-                <p className="text-sm text-muted-foreground mt-1">{s.label}</p>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      </section>
-
-      <section className="container py-8">
-        <h2 className="text-2xl font-bold mb-6">Explore DormScope</h2>
-        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {features.map((f) => (
-            <Link key={f.href} href={f.href}>
-              <Card className="h-full hover:border-primary transition-colors cursor-pointer">
-                <CardHeader>
-                  <f.icon className="h-8 w-8 text-primary mb-2" />
-                  <CardTitle className="text-lg">{f.title}</CardTitle>
-                  <CardDescription>{f.desc}</CardDescription>
-                </CardHeader>
-              </Card>
+          <div className="fade-up fade-up-delay-3 mt-10">
+            <HomeSearch />
+          </div>
+          <div className="fade-up fade-up-delay-3 mt-6 flex flex-wrap items-center gap-4 text-sm">
+            <Link href="/match" className="font-medium text-primary underline-offset-4 hover:underline">
+              Find My Best Dorm
             </Link>
-          ))}
+            <span className="text-border" aria-hidden>
+              ·
+            </span>
+            <Link href="/how-rankings-work" className="text-muted-foreground underline-offset-4 hover:underline">
+              How rankings work
+            </Link>
+          </div>
         </div>
       </section>
 
-      <section className="container py-12">
-        <div className="flex items-center justify-between mb-6">
-          <h2 className="text-2xl font-bold">Featured colleges</h2>
-          <Link href="/colleges">
-            <Button variant="outline">View all</Button>
+      {stats && (
+        <SectionReveal className="border-b border-border/50 bg-card/40">
+          <div className="site-container py-10">
+            <p className="text-sm font-medium text-muted-foreground">Current coverage</p>
+            <dl className="mt-4 grid grid-cols-2 gap-6 sm:grid-cols-4">
+              <div>
+                <dt className="text-xs uppercase tracking-wide text-muted-foreground">Colleges</dt>
+                <dd className="mt-1 font-display text-3xl text-forest">{stats.totalColleges}</dd>
+              </div>
+              <div>
+                <dt className="text-xs uppercase tracking-wide text-muted-foreground">Halls</dt>
+                <dd className="mt-1 font-display text-3xl text-forest">{stats.totalDorms}</dd>
+              </div>
+              <div>
+                <dt className="text-xs uppercase tracking-wide text-muted-foreground">States</dt>
+                <dd className="mt-1 font-display text-3xl text-forest">{stats.statesCovered}</dd>
+              </div>
+              <div>
+                <dt className="text-xs uppercase tracking-wide text-muted-foreground">Sources</dt>
+                <dd className="mt-1 font-display text-3xl text-forest">{stats.totalSources}</dd>
+              </div>
+            </dl>
+          </div>
+        </SectionReveal>
+      )}
+
+      <SectionReveal id="how-it-works" className="site-container py-20 md:py-28">
+        <h2 className="font-display text-3xl tracking-tight text-foreground md:text-4xl">How it works</h2>
+        <p className="mt-3 max-w-xl text-muted-foreground">
+          Three steps. No quiz gimmicks — preferences map directly to how we rank halls.
+        </p>
+        <ol className="mt-12 grid gap-10 md:grid-cols-3 md:gap-8">
+          {steps.map((s) => (
+            <li key={s.n} className="relative">
+              <span className="font-display text-sm text-sage">{s.n}</span>
+              <h3 className="mt-2 font-display text-xl text-foreground">{s.title}</h3>
+              <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{s.body}</p>
+            </li>
+          ))}
+        </ol>
+        <div className="mt-12">
+          <Link href="/match">
+            <Button size="lg">Start Find My Best Dorm</Button>
           </Link>
         </div>
-        <div className="grid md:grid-cols-3 gap-4">
-          {[
-            { name: "Santa Clara University", slug: "santa-clara-university", state: "CA" },
-            { name: "University of Michigan", slug: "university-of-michigan", state: "MI" },
-            { name: "University of Texas at Austin", slug: "university-of-texas-at-austin", state: "TX" },
-          ].map((c) => (
-            <Link key={c.slug} href={`/colleges/${c.slug}`}>
-              <Card className="hover:shadow-md transition-shadow">
-                <CardHeader>
-                  <CardTitle>{c.name}</CardTitle>
-                  <CardDescription>{c.state} · View all dorms →</CardDescription>
-                </CardHeader>
-              </Card>
-            </Link>
-          ))}
-        </div>
-      </section>
+      </SectionReveal>
 
-      <section className="bg-muted/50 py-16">
-        <div className="container text-center max-w-2xl">
-          <Search className="h-10 w-10 text-primary mx-auto mb-4" />
-          <h2 className="text-2xl font-bold mb-2">Built to scale nationwide</h2>
-          <p className="text-muted-foreground">
-            Seed data powers the demo. The scraper pipeline, confidence scoring, and admin tools are
-            designed to index every U.S. college over time.
-          </p>
-          <Link href="/about">
-            <Button className="mt-6">How DormScope works</Button>
-          </Link>
-        </div>
-      </section>
+      {featured.length > 0 && (
+        <SectionReveal className="border-t border-border/50 bg-secondary/30">
+          <div className="site-container py-16 md:py-20">
+            <div className="flex flex-wrap items-end justify-between gap-4">
+              <div>
+                <h2 className="font-display text-3xl tracking-tight">Explore colleges</h2>
+                <p className="mt-2 text-muted-foreground">Schools with housing data in DormScope today.</p>
+              </div>
+              <Link href="/colleges">
+                <Button variant="outline">View all</Button>
+              </Link>
+            </div>
+            <ul className="mt-10 divide-y divide-border/70 border-y border-border/70">
+              {featured.map((c) => (
+                <li key={c.id}>
+                  <Link
+                    href={`/colleges/${c.slug}`}
+                    className="flex flex-wrap items-baseline justify-between gap-2 py-5 transition-colors hover:text-primary"
+                  >
+                    <span className="font-display text-xl">{c.name}</span>
+                    <span className="text-sm text-muted-foreground">
+                      {c.city}, {c.state}
+                      {c.dormCount != null ? ` · ${c.dormCount} halls` : ""}
+                    </span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </SectionReveal>
+      )}
+
+      <SectionReveal className="site-container py-20 text-center md:py-24">
+        <h2 className="font-display text-3xl tracking-tight">Ready when you are</h2>
+        <p className="mx-auto mt-3 max-w-md text-muted-foreground">
+          Pick a college and we&apos;ll rank halls against what you actually care about.
+        </p>
+        <Link href="/match" className="mt-8 inline-block">
+          <Button size="lg">Find My Best Dorm</Button>
+        </Link>
+      </SectionReveal>
     </div>
   );
 }

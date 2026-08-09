@@ -1,11 +1,10 @@
-import { QuizClient } from "@/components/quiz/quiz-client";
+import { redirect } from "next/navigation";
 
-export default function QuizPage() {
-  return (
-    <div className="container py-10 max-w-2xl">
-      <h1 className="text-3xl font-bold mb-2">Dorm-fit quiz</h1>
-      <p className="text-muted-foreground mb-8">Answer a few questions for weighted dorm recommendations.</p>
-      <QuizClient />
-    </div>
-  );
+export default function QuizRedirectPage({
+  searchParams,
+}: {
+  searchParams: { college?: string };
+}) {
+  const q = searchParams.college ? `?college=${encodeURIComponent(searchParams.college)}` : "";
+  redirect(`/match${q}`);
 }

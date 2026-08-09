@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getDormBadges } from "@dormscope/shared";
+import { moneyOrUnknown } from "@/lib/utils";
 
 export interface DormCardData {
   id: string;
@@ -39,38 +39,38 @@ export function DormCard({ dorm, collegeAvgCost }: { dorm: DormCardData; college
   });
 
   return (
-    <Card className="hover:shadow-md transition-shadow h-full">
-      <CardHeader className="pb-2">
-        <div className="flex justify-between items-start gap-2">
-          <CardTitle className="text-lg">
+    <article className="flex h-full flex-col rounded-xl border border-border bg-card p-5 transition-shadow hover:shadow-md">
+      <div className="flex items-start justify-between gap-2">
+        <div>
+          <h3 className="font-display text-lg leading-snug">
             <Link
               href={`/colleges/${dorm.college.slug}/dorms/${dorm.slug}`}
               className="hover:text-primary"
             >
               {dorm.name}
             </Link>
-          </CardTitle>
-          {dorm.dormScore && (
-            <span className="text-2xl font-bold text-primary">{dorm.dormScore.overallScore}</span>
-          )}
+          </h3>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {dorm.college.name} · {dorm.college.state}
+          </p>
         </div>
-        <p className="text-sm text-muted-foreground">
-          {dorm.college.name} · {dorm.college.state}
-        </p>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        <div className="flex flex-wrap gap-1">
-          {badges.slice(0, 5).map((b) => (
-            <Badge key={b.label} variant={b.variant}>
-              {b.label}
-            </Badge>
-          ))}
-        </div>
-        <div className="text-sm grid grid-cols-2 gap-1 text-muted-foreground">
-          <span>Cost: {dorm.yearlyCost ? `$${dorm.yearlyCost.toLocaleString()}/yr` : "Unknown"}</span>
-          <span>Bath: {dorm.bathroomStyle?.replace("_", " ") ?? "Unknown"}</span>
-        </div>
-      </CardContent>
-    </Card>
+        {dorm.dormScore != null && (
+          <span className="font-display text-2xl tabular-nums text-primary">
+            {dorm.dormScore.overallScore}
+          </span>
+        )}
+      </div>
+      <div className="mt-3 flex flex-wrap gap-1">
+        {badges.slice(0, 5).map((b) => (
+          <Badge key={b.label} variant={b.variant}>
+            {b.label}
+          </Badge>
+        ))}
+      </div>
+      <div className="mt-auto grid grid-cols-2 gap-1 pt-4 text-sm text-muted-foreground">
+        <span>Cost: {moneyOrUnknown(dorm.yearlyCost)}</span>
+        <span>Bath: {dorm.bathroomStyle?.replace(/_/g, " ") ?? "Unknown"}</span>
+      </div>
+    </article>
   );
 }

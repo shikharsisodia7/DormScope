@@ -11,6 +11,7 @@
   "dependencies": {
     "@dormscope/database": "*",
     "@dormscope/scoring": "*",
+    "@dormscope/scraper": "*",
     "@dormscope/shared": "*",
     "bullmq": "^5.25.5",
     "cors": "^2.8.5",

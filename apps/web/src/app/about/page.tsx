@@ -1,26 +1,57 @@
+import Link from "next/link";
+import type { Metadata } from "next";
+import { Button } from "@/components/ui/button";
+
+export const metadata: Metadata = {
+  title: "About",
+  description: "What DormScope is, how we use public housing data, and how to verify with your university.",
+};
+
 export default function AboutPage() {
   return (
-    <div className="container py-10 max-w-3xl prose dark:prose-invert">
-      <h1>About DormScope</h1>
-      <p>
-        DormScope is a nationwide college dorm intelligence platform. We collect public information from
-        official university housing websites, rate pages, residence life pages, and campus maps — then
-        normalize, score, and present it so students can search, compare, and choose housing with confidence.
-      </p>
-      <h2>Methodology</h2>
-      <ul>
-        <li>Only public sources — no logins, paywalls, or private data</li>
-        <li>Every field has a confidence score; missing data shows as Unknown</li>
-        <li>DormScope Score (0–100) blends value, comfort, privacy, social, convenience, freshman fit, amenities, and data confidence</li>
-        <li>Rule-based summaries always work; optional OpenAI for richer text when API key is set</li>
-      </ul>
-      <h2>Scoring weights</h2>
-      <p>Value 15%, Comfort 15%, Privacy 12%, Social 10%, Convenience 10%, Freshman fit 13%, Amenities 12%, Data confidence 13%.</p>
-      <h2>Disclaimer</h2>
-      <p>
-        Data comes from public sources and may be incomplete or outdated. Always verify costs, availability,
-        and policies with your university&apos;s official housing office before making decisions.
-      </p>
+    <div className="site-container py-10 md:py-14">
+      <article className="mx-auto max-w-2xl space-y-8">
+        <header>
+          <h1 className="font-display text-3xl tracking-tight md:text-4xl">About DormScope</h1>
+          <p className="mt-3 text-lg text-muted-foreground">
+            Independent dorm intelligence for students choosing where to live on campus.
+          </p>
+        </header>
+
+        <section className="space-y-3 text-sm leading-relaxed text-muted-foreground">
+          <p>
+            DormScope helps you pick a college, say what matters, and get residence halls ranked for
+            you — with match scores, confidence, reasons, and clear unknowns when we lack evidence.
+          </p>
+          <p>
+            We collect information from public university housing pages and related public sources.
+            We are not affiliated with any school. Always verify costs, eligibility, and policies with
+            your university&apos;s official housing office before you decide.
+          </p>
+        </section>
+
+        <section>
+          <h2 className="font-display text-2xl">How we work</h2>
+          <ul className="mt-3 list-disc space-y-2 pl-5 text-sm text-muted-foreground">
+            <li>Public sources only — no logins or paywalled data</li>
+            <li>Missing facts show as Unknown, never as invented Yes/No</li>
+            <li>Personalized ranking uses your weights and optional hard requirements</li>
+            <li>Coverage grows over time; empty colleges show an honest empty state</li>
+          </ul>
+        </section>
+
+        <section className="flex flex-wrap gap-3">
+          <Link href="/match">
+            <Button>Find My Best Dorm</Button>
+          </Link>
+          <Link href="/how-rankings-work">
+            <Button variant="outline">How rankings work</Button>
+          </Link>
+          <Link href="/community">
+            <Button variant="ghost">Community</Button>
+          </Link>
+        </section>
+      </article>
     </div>
   );
 }

@@ -1,10 +1,45 @@
 import { prisma, ScrapeJobStatus, SourceType } from "@dormscope/database";
-import { slugify, fuzzyDormNameMatch } from "@dormscope/shared";
-import { computeDormScore } from "@dormscope/scoring";
 import { chromium } from "playwright";
 import { parseHousingHtml } from "../html/parsePage.js";
 import { housingSearchQueries, extractDomain, isOfficialDomain } from "../discovery/queries.js";
-import { sourceConfidence, completenessScore } from "../confidence/score.js";
+import { sourceConfidence } from "../confidence/score.js";
+import { assertSafeUrl, SafeUrlError } from "../security/ssrf.js";
+import { persistExtractedDorm } from "../ingest/persistDorm.js";
+
+async function fetchHtmlWithCheerio(url: string): Promise<string | null> {
+  await assertSafeUrl(url);
+  const res = await fetch(url, {
+    headers: {
+      "User-Agent": process.env.SCRAPER_USER_AGENT ?? "DormScopeBot/1.0 (+https://dormscope.app)",
+      Accept: "text/html,application/xhtml+xml",
+    },
+    redirect: "follow",
+    signal: AbortSignal.timeout(25000),
+  });
+  if (!res.ok) return null;
+  const ct = res.headers.get("content-type") ?? "";
+  if (!/text\/html|application\/xhtml/i.test(ct) && ct !== "") {
+    // still try if content-type missing
+    if (ct && !/html|text|xml/i.test(ct)) return null;
+  }
+  return await res.text();
+}
+
+async function fetchHtmlWithPlaywright(url: string): Promise<string | null> {
+  await assertSafeUrl(url);
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage();
+    await page.setExtraHTTPHeaders({
+      "User-Agent": process.env.SCRAPER_USER_AGENT ?? "DormScopeBot/1.0",
+    });
+    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
+    await new Promise((r) => setTimeout(r, Number(process.env.SCRAPER_RATE_LIMIT_MS ?? 2000)));
+    return await page.content();
+  } finally {
+    await browser.close();
+  }
+}
 
 export async function runScraperForCollege(collegeSlug: string) {
   const college = await prisma.college.findUnique({ where: { slug: collegeSlug } });
@@ -16,6 +51,7 @@ export async function runScraperForCollege(collegeSlug: string) {
       status: ScrapeJobStatus.RUNNING,
       startedAt: new Date(),
       candidateUrls: [],
+      stage: "discover",
     },
   });
 
@@ -25,107 +61,123 @@ export async function runScraperForCollege(collegeSlug: string) {
 
   const candidateUrls: string[] = [];
   if (college.housingUrl) candidateUrls.push(college.housingUrl);
-  if (college.websiteUrl) {
-    housingSearchQueries(college.name).forEach(() => {});
-    candidateUrls.push(`${college.websiteUrl.replace(/\/$/, "")}/housing`);
-  }
 
   const domain = extractDomain(college.websiteUrl);
+  const queries = housingSearchQueries(college.name);
+
+  if (college.websiteUrl) {
+    const base = college.websiteUrl.replace(/\/$/, "");
+    // Use search queries to derive common housing path candidates (not empty forEach)
+    const pathHints = [
+      "/housing",
+      "/residence-life",
+      "/residential-life",
+      "/student-life/housing",
+      "/campus-life/housing",
+    ];
+    for (const path of pathHints) {
+      candidateUrls.push(`${base}${path}`);
+    }
+    await log("info", `Discovery queries prepared: ${queries.slice(0, 3).join("; ")}`);
+  }
+
+  // Deduplicate candidates
+  const uniqueUrls = Array.from(new Set(candidateUrls)).slice(0, 5);
   let dormsFound = 0;
 
   try {
     await log("info", `Starting scrape for ${college.name}`);
 
-    const browser = await chromium.launch({ headless: true });
-    const page = await browser.newPage();
-    await page.setExtraHTTPHeaders({
-      "User-Agent": process.env.SCRAPER_USER_AGENT ?? "DormScopeBot/1.0",
-    });
-
-    for (const url of candidateUrls.slice(0, 3)) {
+    for (const url of uniqueUrls) {
       try {
-        await log("info", `Fetching ${url}`, url);
-        await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
-        await new Promise((r) => setTimeout(r, Number(process.env.SCRAPER_RATE_LIMIT_MS ?? 2000)));
-        const html = await page.content();
-        const extracted = parseHousingHtml(html, url);
+        // Gate: official domain preferred; always SSRF-check
+        const official = domain ? isOfficialDomain(url, domain) : false;
+        if (domain && !official && !college.housingUrl) {
+          await log("warn", `Skipping non-official URL`, url);
+          continue;
+        }
 
-        await prisma.source.create({
+        await assertSafeUrl(url);
+        await log("info", `Fetching ${url}`, url);
+
+        let html = await fetchHtmlWithCheerio(url);
+        let usedBrowser = false;
+        let extracted = html ? parseHousingHtml(html, url) : [];
+
+        // Playwright only if cheerio found nothing useful
+        if (!html || extracted.length === 0) {
+          await log("info", `Cheerio insufficient; trying Playwright`, url);
+          html = await fetchHtmlWithPlaywright(url);
+          usedBrowser = true;
+          extracted = html ? parseHousingHtml(html, url) : [];
+        }
+
+        if (!html) {
+          await log("warn", `No HTML retrieved`, url);
+          continue;
+        }
+
+        const source = await prisma.source.create({
           data: {
             collegeId: college.id,
             url,
             title: `${college.name} housing page`,
-            sourceType: isOfficialDomain(url, domain) ? SourceType.OFFICIAL_WEBSITE : SourceType.OTHER,
+            sourceType: official ? SourceType.OFFICIAL_WEBSITE : SourceType.OTHER,
             confidence: sourceConfidence(SourceType.OFFICIAL_WEBSITE),
             scrapedAt: new Date(),
-            isApproved: isOfficialDomain(url, domain),
+            isApproved: official,
             rawSnippet: html.slice(0, 2000),
           },
         });
 
+        await log(
+          "info",
+          `Parsed ${extracted.length} hall candidates via ${usedBrowser ? "playwright" : "cheerio"}`,
+          url
+        );
+
         for (const ex of extracted) {
-          const dormSlug = slugify(ex.name);
-          const existing = await prisma.dorm.findFirst({
-            where: { collegeId: college.id, name: { contains: ex.name.split(" ")[0], mode: "insensitive" } },
-          });
-
-          if (existing && fuzzyDormNameMatch(existing.name, ex.name) < 0.7) continue;
-
-          const yearlyCost = ex.costs.find((c) => c.period === "yearly" || c.period === "room_board")?.amount;
-          const data = {
-            name: ex.name,
-            slug: dormSlug,
+          const result = await persistExtractedDorm(ex, {
             collegeId: college.id,
-            officialHousingUrl: url,
-            imageUrl: ex.imageUrl,
-            yearlyCost,
-            confidenceScore: sourceConfidence(SourceType.OFFICIAL_WEBSITE),
-            dataCompletenessScore: completenessScore({
-              name: ex.name,
-              yearlyCost,
-              amenities: ex.amenities.length,
-            }),
-            hasAC: ex.amenities.includes("ac") ? true : undefined,
-            laundryAccess: ex.amenities.includes("laundry"),
-            kitchenAccess: ex.amenities.includes("kitchen"),
-            studyLounges: ex.amenities.includes("study_lounge"),
-          };
-
-          const dorm = existing
-            ? await prisma.dorm.update({ where: { id: existing.id }, data: { ...data, lastUpdatedAt: new Date() } })
-            : await prisma.dorm.create({ data });
-
-          const avg = yearlyCost ?? 15000;
-          const scores = computeDormScore({
-            yearlyCost,
-            collegeAvgCost: avg,
-            hasAC: data.hasAC,
-            amenityCount: ex.amenities.length,
-            confidenceScore: data.confidenceScore,
+            sourceUrl: url,
+            sourceId: source.id,
+            isOfficial: official,
           });
-
-          await prisma.dormScore.upsert({
-            where: { dormId: dorm.id },
-            create: { dormId: dorm.id, ...scores, breakdown: scores.breakdown },
-            update: { ...scores, breakdown: scores.breakdown, calculatedAt: new Date() },
-          });
-
-          dormsFound++;
+          if (result) dormsFound++;
         }
       } catch (err) {
-        await log("error", `Failed ${url}: ${(err as Error).message}`, url);
+        const msg =
+          err instanceof SafeUrlError
+            ? `SSRF blocked: ${err.message}`
+            : `Failed ${url}: ${(err as Error).message}`;
+        await log("error", msg, url);
       }
     }
 
-    await browser.close();
+    const coverage =
+      dormsFound > 0
+        ? "PARTIAL"
+        : college.hasResidentialHousing === false
+          ? "NO_HOUSING"
+          : "FAILED";
+
+    await prisma.college.update({
+      where: { id: college.id },
+      data: {
+        housingCoverageStatus: coverage as never,
+        dataFreshnessAt: new Date(),
+        lastUpdatedAt: new Date(),
+      },
+    });
 
     await prisma.scrapeJob.update({
       where: { id: job.id },
       data: {
         status: ScrapeJobStatus.COMPLETED,
         completedAt: new Date(),
-        candidateUrls,
+        candidateUrls: uniqueUrls,
         dormsFound,
+        stage: "complete",
       },
     });
 
@@ -134,7 +186,12 @@ export async function runScraperForCollege(collegeSlug: string) {
   } catch (err) {
     await prisma.scrapeJob.update({
       where: { id: job.id },
-      data: { status: ScrapeJobStatus.FAILED, errorMessage: (err as Error).message, completedAt: new Date() },
+      data: {
+        status: ScrapeJobStatus.FAILED,
+        errorMessage: (err as Error).message,
+        completedAt: new Date(),
+        lastError: (err as Error).message,
+      },
     });
     await log("error", (err as Error).message);
     throw err;

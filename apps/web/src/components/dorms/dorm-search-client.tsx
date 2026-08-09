@@ -30,7 +30,8 @@ export function DormSearchClient({
     router.push(`/dorms?${p}`);
     try {
       const res = await fetch(`${API_URL}/api/dorms/search?${p}`);
-      setDorms(await res.json());
+      const data = await res.json();
+      setDorms(Array.isArray(data) ? data : data.items ?? data.dorms ?? []);
     } catch {
       setDorms([]);
     }

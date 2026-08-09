@@ -1,6 +1,12 @@
+import type { Metadata } from "next";
 import { DormSearchClient } from "@/components/dorms/dorm-search-client";
 import { fetchApi } from "@/lib/utils";
 import type { DormCardData } from "@/components/dorms/dorm-card";
+
+export const metadata: Metadata = {
+  title: "Search dorms",
+  description: "Filter residence halls by amenities, cost, bathroom style, and more.",
+};
 
 export default async function DormsPage({
   searchParams,
@@ -12,15 +18,21 @@ export default async function DormsPage({
 
   let dorms: DormCardData[] = [];
   try {
-    dorms = await fetchApi<DormCardData[]>(`/api/dorms/search?${params}`);
+    const data = await fetchApi<DormCardData[] | { items?: DormCardData[]; dorms?: DormCardData[] }>(
+      `/api/dorms/search?${params}`,
+      { cache: "no-store" }
+    );
+    dorms = Array.isArray(data) ? data : data.items ?? data.dorms ?? [];
   } catch {
     dorms = [];
   }
 
   return (
-    <div className="container py-10">
-      <h1 className="text-3xl font-bold mb-2">Dorm search</h1>
-      <p className="text-muted-foreground mb-8">Filter by amenities, cost, bathroom style, and more.</p>
+    <div className="site-container py-10 md:py-14">
+      <h1 className="font-display text-3xl tracking-tight md:text-4xl">Search dorms</h1>
+      <p className="mt-2 mb-8 text-muted-foreground">
+        Filter by amenities, cost, bathroom style, and more.
+      </p>
       <DormSearchClient initialDorms={dorms} initialParams={searchParams} />
     </div>
   );

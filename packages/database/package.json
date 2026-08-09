@@ -10,12 +10,19 @@
     "migrate": "prisma migrate dev",
     "seed": "tsx prisma/seed.ts",
     "studio": "prisma studio",
-    "build": "prisma generate"
+    "build": "prisma generate",
+    "import:institutions": "tsx scripts/import-institutions.ts",
+    "seed:halls": "tsx scripts/seed-official-hall-directories.ts",
+    "coverage": "tsx scripts/coverage-report.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0"
   },
+  "optionalDependencies": {
+    "adm-zip": "^0.5.18"
+  },
   "devDependencies": {
+    "@types/adm-zip": "^0.5.7",
     "prisma": "^5.22.0",
     "tsx": "^4.19.2",
     "typescript": "^5.6.3"

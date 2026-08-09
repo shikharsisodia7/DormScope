@@ -4,55 +4,179 @@
 
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 222 47% 11%;
-    --card: 0 0% 100%;
-    --card-foreground: 222 47% 11%;
-    --primary: 221 83% 53%;
-    --primary-foreground: 210 40% 98%;
-    --secondary: 210 40% 96%;
-    --secondary-foreground: 222 47% 11%;
-    --muted: 210 40% 96%;
-    --muted-foreground: 215 16% 47%;
-    --accent: 210 40% 96%;
-    --accent-foreground: 222 47% 11%;
-    --destructive: 0 84% 60%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 214 32% 91%;
-    --input: 214 32% 91%;
-    --ring: 221 83% 53%;
-    --radius: 0.75rem;
+    /* Warm stone canvas — DormScope identity */
+    --background: 40 20% 95%;
+    --foreground: 160 12% 12%;
+    --card: 40 25% 98%;
+    --card-foreground: 160 12% 12%;
+    --primary: 158 82% 24%;
+    --primary-foreground: 40 30% 98%;
+    --secondary: 150 18% 90%;
+    --secondary-foreground: 158 40% 18%;
+    --muted: 40 14% 91%;
+    --muted-foreground: 160 8% 38%;
+    --accent: 148 22% 88%;
+    --accent-foreground: 158 50% 18%;
+    --destructive: 0 72% 46%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 40 12% 84%;
+    --input: 40 12% 84%;
+    --ring: 158 82% 28%;
+    --radius: 0.625rem;
+    --sage: 148 22% 72%;
+    --amber-score: 38 92% 48%;
+    --forest-deep: 158 70% 14%;
   }
 
   .dark {
-    --background: 222 47% 6%;
-    --foreground: 210 40% 98%;
-    --card: 222 47% 8%;
-    --card-foreground: 210 40% 98%;
-    --primary: 217 91% 60%;
-    --primary-foreground: 222 47% 11%;
-    --secondary: 217 33% 17%;
-    --secondary-foreground: 210 40% 98%;
-    --muted: 217 33% 17%;
-    --muted-foreground: 215 20% 65%;
-    --accent: 217 33% 17%;
-    --accent-foreground: 210 40% 98%;
-    --destructive: 0 62% 50%;
-    --border: 217 33% 17%;
-    --input: 217 33% 17%;
-    --ring: 224 76% 48%;
+    --background: 160 14% 8%;
+    --foreground: 40 20% 94%;
+    --card: 160 12% 11%;
+    --card-foreground: 40 20% 94%;
+    --primary: 158 55% 42%;
+    --primary-foreground: 160 20% 8%;
+    --secondary: 160 12% 16%;
+    --secondary-foreground: 40 20% 94%;
+    --muted: 160 10% 16%;
+    --muted-foreground: 40 10% 65%;
+    --accent: 158 18% 18%;
+    --accent-foreground: 40 20% 94%;
+    --destructive: 0 62% 45%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 160 10% 20%;
+    --input: 160 10% 20%;
+    --ring: 158 55% 42%;
+    --sage: 148 18% 36%;
+    --amber-score: 38 85% 55%;
+    --forest-deep: 158 40% 70%;
   }
-}
 
-@layer base {
   * {
     @apply border-border;
   }
+
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-foreground font-sans antialiased;
+  }
+
+  :focus-visible {
+    @apply outline-none ring-2 ring-ring ring-offset-2 ring-offset-background;
   }
 }
 
-.container {
-  @apply max-w-7xl mx-auto px-4;
+@layer components {
+  .site-container {
+    @apply mx-auto w-full max-w-6xl px-4 sm:px-6;
+  }
+
+  .campus-hero {
+    background-color: hsl(var(--background));
+    background-image:
+      radial-gradient(ellipse 80% 60% at 15% 20%, hsl(158 40% 70% / 0.22), transparent 55%),
+      radial-gradient(ellipse 70% 50% at 85% 10%, hsl(148 30% 75% / 0.18), transparent 50%),
+      radial-gradient(ellipse 90% 70% at 50% 100%, hsl(40 30% 88% / 0.9), transparent 60%),
+      repeating-linear-gradient(
+        -12deg,
+        transparent,
+        transparent 28px,
+        hsl(158 20% 50% / 0.03) 28px,
+        hsl(158 20% 50% / 0.03) 29px
+      );
+  }
+
+  .fade-up {
+    opacity: 0;
+    transform: translateY(1.25rem);
+    animation: fade-up 0.7s ease forwards;
+  }
+
+  .fade-up-delay-1 { animation-delay: 0.08s; }
+  .fade-up-delay-2 { animation-delay: 0.16s; }
+  .fade-up-delay-3 { animation-delay: 0.24s; }
+
+  .search-underline {
+    position: relative;
+  }
+
+  .search-underline::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    bottom: 0;
+    height: 2px;
+    width: 0;
+    background: hsl(var(--primary));
+    transition: width 0.35s ease;
+  }
+
+  .search-underline:focus-within::after {
+    width: 100%;
+  }
+
+  .match-score {
+    color: hsl(var(--amber-score));
+    font-variant-numeric: tabular-nums;
+    animation: score-pop 0.55s ease both;
+  }
+
+  .section-reveal {
+    opacity: 0;
+    transform: translateY(1.5rem);
+    transition: opacity 0.65s ease, transform 0.65s ease;
+  }
+
+  .section-reveal.is-visible {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@layer utilities {
+  .font-display {
+    font-family: var(--font-display), ui-serif, Georgia, serif;
+  }
+
+  .text-balance {
+    text-wrap: balance;
+  }
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(1.25rem);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes score-pop {
+  from {
+    opacity: 0;
+    transform: translateY(0.35rem) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fade-up,
+  .fade-up-delay-1,
+  .fade-up-delay-2,
+  .fade-up-delay-3,
+  .match-score,
+  .section-reveal {
+    animation: none !important;
+    transition: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+  }
+
+  .search-underline::after {
+    transition: none;
+  }
 }

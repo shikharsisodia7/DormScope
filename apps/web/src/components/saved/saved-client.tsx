@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { getGuestFavorites } from "@/lib/storage";
 import { API_URL } from "@/lib/utils";
 import { DormCard, type DormCardData } from "@/components/dorms/dorm-card";
@@ -8,15 +9,21 @@ import { Button } from "@/components/ui/button";
 
 export function SavedClient() {
   const [dorms, setDorms] = useState<DormCardData[]>([]);
+  const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
     const ids = getGuestFavorites();
-    if (!ids.length) return;
-    Promise.all(
-      ids.map((id) =>
-        fetch(`${API_URL}/api/dorms/search`).then((r) => r.json()).then((all: DormCardData[]) => all.find((d) => d.id === id))
-      )
-    ).then((found) => setDorms(found.filter(Boolean) as DormCardData[]));
+    if (!ids.length) {
+      setLoaded(true);
+      return;
+    }
+    fetch(`${API_URL}/api/dorms/search?pageSize=100`)
+      .then((r) => r.json())
+      .then((all: DormCardData[] | { items?: DormCardData[]; dorms?: DormCardData[] }) => {
+        const list = Array.isArray(all) ? all : all.items ?? all.dorms ?? [];
+        setDorms(list.filter((d) => ids.includes(d.id)));
+      })
+      .finally(() => setLoaded(true));
   }, []);
 
   function exportJson() {
@@ -27,12 +34,28 @@ export function SavedClient() {
     a.click();
   }
 
-  if (!dorms.length) return <p className="text-muted-foreground">No saved dorms yet.</p>;
+  if (!loaded) return <p className="text-muted-foreground">Loading saved dorms…</p>;
+
+  if (!dorms.length) {
+    return (
+      <div className="rounded-lg border border-dashed border-border px-6 py-12 text-center">
+        <p className="font-medium">No saved dorms yet.</p>
+        <p className="mt-2 text-sm text-muted-foreground">
+          Save halls from a dorm page to find them here later.
+        </p>
+        <Link href="/match" className="mt-6 inline-block">
+          <Button>Find My Best Dorm</Button>
+        </Link>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">
-      <Button variant="outline" onClick={exportJson}>Export JSON</Button>
-      <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
+      <Button variant="outline" onClick={exportJson}>
+        Export JSON
+      </Button>
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
         {dorms.map((d) => (
           <DormCard key={d.id} dorm={d} />
         ))}
