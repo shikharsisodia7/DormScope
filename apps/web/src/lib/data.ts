@@ -148,7 +148,11 @@ export async function searchColleges(opts: {
     .sort((a, b) => b._score - a._score || a.name.localeCompare(b.name))
     .slice(0, pageSize);
 
-  return scored.map(({ _score, ...c }) => c);
+  return scored.map((row) => {
+    const { _score, ...rest } = row;
+    void _score;
+    return rest;
+  });
 }
 
 export async function searchDorms(searchParams: Record<string, string | undefined>) {
