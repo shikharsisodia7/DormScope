@@ -10,7 +10,7 @@ import { test, expect } from "@playwright/test";
 import { expectPageOk } from "./helpers/expect-page.js";
 
 const FIXTURE_SLUG = "berkeley-fixture";
-const PROD_SLUG = "uc-berkeley"; // real slug on production
+const PROD_SLUG = "university-of-california-berkeley";
 const useFixtures = Boolean(process.env.PLAYWRIGHT_FIXTURES);
 const slug = useFixtures ? FIXTURE_SLUG : PROD_SLUG;
 
@@ -28,7 +28,7 @@ test.describe("Berkeley college page", () => {
       await expectPageOk(page);
       // College name should appear somewhere on the page
       if (useFixtures) {
-        await expect(page.getByText(/UC Berkeley \(Fixture\)/i)).toBeVisible();
+        await expect(page.getByRole("heading", { name: /UC Berkeley \(Fixture\)/i })).toBeVisible();
       }
     }
   });
@@ -54,6 +54,6 @@ test.describe("Berkeley college page", () => {
     await expectPageOk(page);
 
     // Fixture dorms: Unit 1, Unit 2
-    await expect(page.getByText(/Unit 1/i)).toBeVisible();
+    await expect(page.getByRole("heading", { name: /^Unit 1$/i }).or(page.getByText("Unit 1").first())).toBeVisible();
   });
 });
