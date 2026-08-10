@@ -22,7 +22,10 @@ export interface DormCardData {
   isVerified?: boolean;
   diningDistanceMeters?: number | null;
   college: { name: string; slug: string; state: string };
-  dormScore?: { overallScore: number } | null;
+  dormScore?: {
+    overallScore: number | null;
+    scoreable?: boolean;
+  } | null;
 }
 
 export function DormCard({ dorm, collegeAvgCost }: { dorm: DormCardData; collegeAvgCost?: number }) {
@@ -58,9 +61,15 @@ export function DormCard({ dorm, collegeAvgCost }: { dorm: DormCardData; college
           </p>
         </div>
         {dorm.dormScore != null && (
-          <span className="font-display text-2xl tabular-nums text-primary">
-            {dorm.dormScore.overallScore}
-          </span>
+          dorm.dormScore.overallScore != null && dorm.dormScore.scoreable !== false ? (
+            <span className="font-display text-2xl tabular-nums text-primary">
+              {dorm.dormScore.overallScore}
+            </span>
+          ) : (
+            <span className="text-xs text-muted-foreground text-right max-w-[5rem] leading-snug">
+              More data needed
+            </span>
+          )
         )}
       </div>
       <div className="mt-3 flex flex-wrap gap-1">

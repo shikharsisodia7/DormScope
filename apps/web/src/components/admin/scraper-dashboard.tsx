@@ -3,35 +3,57 @@
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { API_URL } from "@/lib/utils";
 import { useState } from "react";
 
 interface Job {
   id: string;
   status: string;
   dormsFound: number;
-  errorMessage?: string;
+  errorMessage?: string | null;
   college: { name: string; slug: string };
-  logs: { level: string; message: string; createdAt: string }[];
+  logs: { level: string; message: string; createdAt: string | Date }[];
 }
 
 export function ScraperDashboard({ initialJobs }: { initialJobs: Job[] }) {
   const [jobs, setJobs] = useState(initialJobs);
   const [slug, setSlug] = useState("santa-clara-university");
+  const [message, setMessage] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
 
-  async function runScrape() {
-    await fetch(`${API_URL}/api/scraper/run/${slug}`, { method: "POST" });
-    const res = await fetch(`${API_URL}/api/scraper/jobs`);
-    setJobs(await res.json());
+  async function queueRefresh() {
+    setBusy(true);
+    setMessage(null);
+    try {
+      const res = await fetch(`/api/scraper/run/${encodeURIComponent(slug)}`, { method: "POST" });
+      const body = (await res.json()) as { message?: string; error?: string };
+      if (!res.ok) {
+        setMessage(body.error ?? "Failed to queue refresh.");
+        return;
+      }
+      setMessage(body.message ?? "Queued. Waiting for background worker.");
+      const jobsRes = await fetch("/api/scraper/jobs");
+      if (jobsRes.ok) setJobs(await jobsRes.json());
+    } catch {
+      setMessage("Request failed. Sign in as an admin and try again.");
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
     <div className="space-y-6">
-      <div className="flex gap-2">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
         <Input placeholder="college-slug" value={slug} onChange={(e) => setSlug(e.target.value)} />
-        <Button onClick={runScrape}>Run scraper</Button>
+        <Button onClick={queueRefresh} disabled={busy}>
+          {busy ? "Queueing…" : "Queue refresh"}
+        </Button>
       </div>
-      <p className="text-sm text-muted-foreground">CLI: npm run scraper -- santa-clara-university</p>
+      <p className="text-sm text-muted-foreground">
+        This marks an ingest checkpoint as queued. Processing happens via{" "}
+        <code className="text-xs">npm run scraper -- &lt;college-slug&gt;</code> or{" "}
+        <code className="text-xs">npm run scraper:nationwide</code> — not in Vercel serverless.
+      </p>
+      {message && <p className="text-sm text-muted-foreground">{message}</p>}
       {jobs.map((job) => (
         <Card key={job.id}>
           <CardHeader>

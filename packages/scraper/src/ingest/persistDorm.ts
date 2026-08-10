@@ -1,9 +1,10 @@
 import { prisma, SourceType, HousingEntityKind } from "@dormscope/database";
-import { slugify, fuzzyDormNameMatch } from "@dormscope/shared";
-import { computeDormScore } from "@dormscope/scoring";
+import { slugify, normalizeAC } from "@dormscope/shared";
+import { computeDormScore, DORMSCOPE_SCORE_VERSION } from "@dormscope/scoring";
 import type { ExtractedDorm } from "../html/parsePage.js";
 import { sourceConfidence, completenessScore } from "../confidence/score.js";
 import { canonicalizeUrl } from "../security/ssrf.js";
+import { safeSameEntity } from "./entityResolution.js";
 
 export interface PersistOptions {
   collegeId: string;
@@ -27,32 +28,71 @@ const KIND_MAP: Record<string, HousingEntityKind> = {
   UNKNOWN: HousingEntityKind.UNKNOWN,
 };
 
-/**
- * Safer entity resolution: exact slug / exact alias merge automatically.
- * High fuzzy scores that preserve meaningful numbers/directions only merge
- * when normalized tokens match closely; otherwise skip (no destructive merge).
- */
-function safeSameEntity(a: string, b: string): boolean {
-  const norm = (s: string) =>
-    s
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, " ")
-      .replace(/\b(the|residence|hall|dormitory|dorm|building|community)\b/g, " ")
-      .replace(/\s+/g, " ")
-      .trim();
-  const na = norm(a);
-  const nb = norm(b);
-  if (!na || !nb) return false;
-  if (na === nb) return true;
-  // Never merge Unit 1 with Unit 2, North with South, etc.
-  const numsA = na.match(/\d+/g)?.join(",") ?? "";
-  const numsB = nb.match(/\d+/g)?.join(",") ?? "";
-  if (numsA !== numsB) return false;
-  const dirs = ["north", "south", "east", "west", "upper", "lower"];
-  for (const d of dirs) {
-    if (na.includes(d) !== nb.includes(d)) return false;
+const ASSIGNABLE_KINDS = new Set<HousingEntityKind>([
+  HousingEntityKind.UNIT,
+  HousingEntityKind.APARTMENT_COMMUNITY,
+  HousingEntityKind.HOUSE,
+  HousingEntityKind.BUILDING,
+  HousingEntityKind.RESIDENCE,
+  HousingEntityKind.SUITE_COMMUNITY,
+  HousingEntityKind.LIVING_COMMUNITY,
+]);
+
+const ORGANIZATIONAL_KINDS = new Set<HousingEntityKind>([
+  HousingEntityKind.COMPLEX,
+  HousingEntityKind.VILLAGE,
+  HousingEntityKind.RESIDENTIAL_COLLEGE,
+]);
+
+const PHYSICAL_KINDS = new Set<HousingEntityKind>([
+  HousingEntityKind.BUILDING,
+  HousingEntityKind.HOUSE,
+  HousingEntityKind.UNIT,
+  HousingEntityKind.RESIDENCE,
+]);
+
+function inferHousingFlags(entityKind: HousingEntityKind, _parentNameHint?: string) {
+  let isAssignableHousingOption: boolean;
+  if (ASSIGNABLE_KINDS.has(entityKind)) {
+    isAssignableHousingOption = true;
+  } else if (ORGANIZATIONAL_KINDS.has(entityKind)) {
+    // Organizational containers (complexes, villages) are not directly assignable.
+    isAssignableHousingOption = false;
+  } else {
+    isAssignableHousingOption = entityKind === HousingEntityKind.UNKNOWN || entityKind === HousingEntityKind.OTHER;
   }
-  return fuzzyDormNameMatch(a, b) >= 0.92;
+
+  const isPhysicalBuilding =
+    PHYSICAL_KINDS.has(entityKind) || entityKind === HousingEntityKind.APARTMENT_COMMUNITY;
+
+  return {
+    isAssignableHousingOption,
+    isPhysicalBuilding,
+    rankingGranularity: isAssignableHousingOption,
+  };
+}
+
+function resolveHasAC(ex: ExtractedDorm): boolean | undefined {
+  if (ex.amenities.includes("ac")) return true;
+  if (ex.amenities.includes("no_ac")) return false;
+  const fromDescription = ex.description ? normalizeAC(ex.description) : null;
+  if (fromDescription === true) return true;
+  if (fromDescription === false) return false;
+  return undefined;
+}
+
+function pickYearlyCost(costs: ExtractedDorm["costs"]): number | undefined {
+  const yearly = costs.find(
+    (c) => c.period === "yearly" || c.period === "academic_year"
+  );
+  if (yearly) return yearly.amount;
+
+  const roomOnly = costs.find(
+    (c) =>
+      c.period !== "room_board" &&
+      (/room only|room rate|room cost/i.test(c.label) || c.period === "yearly")
+  );
+  return roomOnly?.amount;
 }
 
 /**
@@ -90,13 +130,12 @@ export async function persistExtractedDorm(
     }
   }
 
-  const hasAC = ex.amenities.includes("ac") ? true : undefined;
+  const hasAC = resolveHasAC(ex);
   const laundryAccess = ex.amenities.includes("laundry") ? true : undefined;
   const kitchenAccess = ex.amenities.includes("kitchen") ? true : undefined;
   const studyLounges = ex.amenities.includes("study_lounge") ? true : undefined;
 
-  const yearlyCost =
-    ex.costs.find((c) => c.period === "yearly" || c.period === "room_board")?.amount ?? undefined;
+  const yearlyCost = pickYearlyCost(ex.costs);
 
   const confidence = sourceConfidence(
     opts.isOfficial ? SourceType.OFFICIAL_WEBSITE : SourceType.OTHER
@@ -108,6 +147,7 @@ export async function persistExtractedDorm(
   });
 
   const entityKind = KIND_MAP[ex.entityKindHint ?? ""] ?? HousingEntityKind.UNKNOWN;
+  const housingFlags = inferHousingFlags(entityKind, ex.parentNameHint);
 
   const baseData = {
     name,
@@ -118,13 +158,14 @@ export async function persistExtractedDorm(
     isVerified: false as const,
     lastUpdatedAt: new Date(),
     entityKind,
-    isAssignableHousingOption: true,
-    rankingGranularity: true,
+    isAssignableHousingOption: housingFlags.isAssignableHousingOption,
+    isPhysicalBuilding: housingFlags.isPhysicalBuilding,
+    rankingGranularity: housingFlags.rankingGranularity,
     // Eligibility stays unknown unless explicitly extracted (never default true)
     ...(ex.imageUrl ? { imageUrl: ex.imageUrl } : {}),
     ...(yearlyCost != null ? { yearlyCost } : {}),
     ...(ex.description ? { description: ex.description } : {}),
-    ...(hasAC ? { hasAC } : {}),
+    ...(hasAC === true ? { hasAC: true } : hasAC === false ? { hasAC: false } : {}),
     ...(laundryAccess ? { laundryAccess } : {}),
     ...(kitchenAccess ? { kitchenAccess } : {}),
     ...(studyLounges ? { studyLounges } : {}),
@@ -163,24 +204,52 @@ export async function persistExtractedDorm(
     update: {},
   });
 
+  // Persist detailed cost rows (including room & board) without promoting them to yearlyCost
+  for (const cost of ex.costs) {
+    const existingCost = await prisma.housingCost.findFirst({
+      where: {
+        dormId: dorm.id,
+        label: cost.label,
+        period: cost.period,
+        amount: cost.amount,
+      },
+    });
+    if (existingCost) continue;
+    await prisma.housingCost.create({
+      data: {
+        dormId: dorm.id,
+        label: cost.label,
+        amount: cost.amount,
+        period: cost.period,
+        confidence,
+        isUncertain: cost.uncertain,
+        sourceUrl: opts.sourceUrl,
+      },
+    });
+  }
+
   const scores = computeDormScore({
     yearlyCost: yearlyCost ?? null,
     collegeAvgCost: null,
     hasAC: hasAC ?? null,
     amenityCount: ex.amenities.length || null,
     confidenceScore: confidence,
+    dataCompletenessScore,
   });
 
   const persisted = {
     overallScore: scores.overallScore,
-    valueScore: scores.valueScore ?? 0,
-    comfortScore: scores.comfortScore ?? 0,
-    privacyScore: scores.privacyScore ?? 0,
-    socialScore: scores.socialScore ?? 0,
-    convenienceScore: scores.convenienceScore ?? 0,
-    freshmanFitScore: scores.freshmanFitScore ?? 0,
-    amenityScore: scores.amenityScore ?? 0,
-    dataConfidenceScore: scores.dataConfidenceScore ?? 0,
+    valueScore: scores.valueScore,
+    comfortScore: scores.comfortScore,
+    privacyScore: scores.privacyScore,
+    socialScore: scores.socialScore,
+    convenienceScore: scores.convenienceScore,
+    freshmanFitScore: scores.freshmanFitScore,
+    amenityScore: scores.amenityScore,
+    dataConfidenceScore: scores.dataConfidenceScore,
+    scoreable: scores.scoreable,
+    evidenceCompleteness: scores.completeness,
+    algorithmVersion: scores.algorithmVersion ?? DORMSCOPE_SCORE_VERSION,
     breakdown: { ...scores.breakdown, completeness: scores.completeness },
   };
 
@@ -194,7 +263,7 @@ export async function persistExtractedDorm(
     { fieldName: "name", value: name },
     { fieldName: "officialHousingUrl", value: ex.detailUrl ?? opts.sourceUrl },
     { fieldName: "yearlyCost", value: yearlyCost != null ? String(yearlyCost) : null },
-    { fieldName: "hasAC", value: hasAC ? "true" : null },
+    { fieldName: "hasAC", value: hasAC === true ? "true" : hasAC === false ? "false" : null },
     { fieldName: "laundryAccess", value: laundryAccess ? "true" : null },
     { fieldName: "kitchenAccess", value: kitchenAccess ? "true" : null },
     { fieldName: "studyLounges", value: studyLounges ? "true" : null },
@@ -205,7 +274,12 @@ export async function persistExtractedDorm(
   for (const f of fields) {
     if (f.value == null) continue;
     const recent = await prisma.fieldProvenance.findFirst({
-      where: { dormId: dorm.id, fieldName: f.fieldName, valueSnapshot: f.value },
+      where: {
+        dormId: dorm.id,
+        fieldName: f.fieldName,
+        valueSnapshot: f.value,
+        sourceId: opts.sourceId,
+      },
       orderBy: { createdAt: "desc" },
     });
     if (recent) continue;

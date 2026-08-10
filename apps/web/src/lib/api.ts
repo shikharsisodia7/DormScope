@@ -57,12 +57,7 @@ export function rateLimit(key: string, limit: number, windowMs: number): boolean
   return true;
 }
 
-export function requireAdminKey(req: Request): boolean {
-  const expected = process.env.ADMIN_API_KEY;
-  if (!expected) return false;
-  const header = req.headers.get("x-admin-key") ?? req.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
-  return header === expected;
-}
+export { requireAdminAuth, requireAdminKey, isAdminUser, requireAdminSession } from "@/lib/admin-auth";
 
 export function randomShareToken(): string {
   const bytes = new Uint8Array(18);

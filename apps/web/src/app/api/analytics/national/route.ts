@@ -64,7 +64,9 @@ export async function GET(req: Request) {
     const scores = await prisma.dormScore.findMany({ select: { overallScore: true } });
     const dist = [0, 20, 40, 60, 80].map((min) => ({
       range: `${min}-${min + 19}`,
-      count: scores.filter((s) => s.overallScore >= min && s.overallScore < min + 20).length,
+      count: scores.filter(
+        (s) => s.overallScore != null && s.overallScore >= min && s.overallScore < min + 20
+      ).length,
     }));
 
     return jsonOk({

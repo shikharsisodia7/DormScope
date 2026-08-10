@@ -1,18 +1,66 @@
 import { prisma } from "@/lib/prisma";
 import { buildCollegeHighlights } from "@/lib/college-helpers";
+import { DataQualityStatus } from "@dormscope/database";
 
 /** Direct DB loaders for Server Components — never HTTP self-fetch on Vercel. */
+
+function isQuarantineExcluded() {
+  return {
+    isActive: true,
+    isAssignableHousingOption: true,
+    rankingGranularity: true,
+    dataQualityStatus: { not: DataQualityStatus.QUARANTINED },
+  };
+}
+
+type SourceLike = {
+  id: string;
+  url: string;
+  title: string | null;
+  sourceType: string;
+  isApproved: boolean;
+  createdAt?: Date;
+};
+
+function mergeSources(
+  legacy: SourceLike[],
+  fromDormSources: Array<{ source: SourceLike; role?: string | null }>
+): SourceLike[] {
+  const byUrl = new Map<string, SourceLike>();
+  for (const s of legacy) {
+    byUrl.set(s.url, s);
+  }
+  for (const ds of fromDormSources) {
+    const s = ds.source;
+    if (!byUrl.has(s.url)) {
+      byUrl.set(s.url, s);
+    }
+  }
+  return Array.from(byUrl.values()).sort(
+    (a, b) => (b.createdAt?.getTime() ?? 0) - (a.createdAt?.getTime() ?? 0)
+  );
+}
 
 export async function getCollegeBySlug(slug: string) {
   const college = await prisma.college.findUnique({
     where: { slug },
     include: {
       dorms: {
-        where: { isActive: true },
+        where: isQuarantineExcluded(),
         include: {
           dormScore: true,
           dormAmenities: { include: { amenity: true } },
           reviewSummaries: { take: 1 },
+          childHousing: {
+            where: isQuarantineExcluded(),
+            select: {
+              id: true,
+              name: true,
+              slug: true,
+              isAssignableHousingOption: true,
+              dormScore: { select: { overallScore: true, scoreable: true } },
+            },
+          },
         },
         orderBy: { name: "asc" },
       },
@@ -23,10 +71,17 @@ export async function getCollegeBySlug(slug: string) {
   });
   if (!college) return null;
 
+  const assignableDorms = college.dorms.filter((d) => d.isAssignableHousingOption);
+  const parentDorms = college.dorms.filter(
+    (d) => !d.isAssignableHousingOption && d.childHousing.length > 0
+  );
+
   return {
     ...college,
-    dormCount: college.dorms.length,
-    highlights: buildCollegeHighlights(college.dorms),
+    dorms: assignableDorms,
+    parentHousing: parentDorms,
+    dormCount: assignableDorms.length,
+    highlights: buildCollegeHighlights(assignableDorms),
   };
 }
 
@@ -43,6 +98,21 @@ export async function getDormBySlugs(collegeSlug: string, dormSlug: string) {
       dormAmenities: { include: { amenity: true } },
       housingCosts: true,
       sources: { where: { isApproved: true }, orderBy: { createdAt: "desc" } },
+      dormSources: {
+        include: {
+          source: {
+            select: {
+              id: true,
+              url: true,
+              title: true,
+              sourceType: true,
+              isApproved: true,
+              createdAt: true,
+            },
+          },
+        },
+        orderBy: { createdAt: "desc" },
+      },
       reviewSummaries: true,
       reviews: {
         where: { status: "APPROVED" },
@@ -71,13 +141,15 @@ export async function getDormBySlugs(collegeSlug: string, dormSlug: string) {
   });
   if (!dorm) return null;
 
+  const mergedSources = mergeSources(dorm.sources, dorm.dormSources);
+
   const costAgg = await prisma.dorm.aggregate({
-    where: { collegeId: college.id, yearlyCost: { not: null } },
+    where: { collegeId: college.id, yearlyCost: { not: null }, ...isQuarantineExcluded() },
     _avg: { yearlyCost: true },
   });
 
   return {
-    dorm,
+    dorm: { ...dorm, sources: mergedSources },
     collegeAvgCost: costAgg._avg.yearlyCost ?? 0,
   };
 }
@@ -156,7 +228,7 @@ export async function searchColleges(opts: {
 }
 
 export async function searchDorms(searchParams: Record<string, string | undefined>) {
-  const where: Record<string, unknown> = { isActive: true };
+  const where: Record<string, unknown> = { ...isQuarantineExcluded() };
   const and: Record<string, unknown>[] = [];
 
   if (searchParams.q) {

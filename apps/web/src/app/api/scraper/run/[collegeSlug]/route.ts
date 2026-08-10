@@ -1,34 +1,48 @@
 import { prisma } from "@/lib/prisma";
-import { jsonOk, jsonError, handleRouteError, requireAdminKey } from "@/lib/api";
+import { requireAdminAuth } from "@/lib/admin-auth";
+import { jsonOk, jsonError, handleRouteError } from "@/lib/api";
 
 export const dynamic = "force-dynamic";
 
 /**
- * Queues a scrape job. Long-running Playwright work must run via the scraper CLI
- * (`npm run scraper -- <college-slug>`), not inside Vercel serverless.
+ * Queues an ingest refresh via IngestCheckpoint. Long-running Playwright work runs
+ * in the scraper CLI/worker — not inside Vercel serverless.
  */
 export async function POST(req: Request, { params }: { params: { collegeSlug: string } }) {
   try {
-    if (!requireAdminKey(req)) return jsonError("Unauthorized", 401);
+    if (!(await requireAdminAuth(req))) return jsonError("Unauthorized", 401);
 
     const college = await prisma.college.findUnique({ where: { slug: params.collegeSlug } });
     if (!college) return jsonError("College not found", 404);
 
-    const job = await prisma.scrapeJob.create({
-      data: {
+    const checkpoint = await prisma.ingestCheckpoint.upsert({
+      where: { collegeId: college.id },
+      create: {
         collegeId: college.id,
-        status: "PENDING",
-        candidateUrls: college.housingUrl ? [college.housingUrl] : [],
         stage: "queued",
+        status: "pending",
+        candidateUrls: college.housingUrl ? [college.housingUrl] : [],
+        metadata: { queuedBy: "admin-ui", queuedAt: new Date().toISOString() },
+      },
+      update: {
+        stage: "queued",
+        status: "pending",
+        candidateUrls: college.housingUrl ? [college.housingUrl] : [],
+        lockedAt: null,
+        lockOwner: null,
+        nextRetryAt: null,
+        lastError: null,
+        metadata: { queuedBy: "admin-ui", queuedAt: new Date().toISOString() },
       },
     });
 
     return jsonOk({
       message:
-        "Job queued. Run `npm run scraper -- " +
-        params.collegeSlug +
-        "` (or scraper:ingest-sample) to process outside the web runtime.",
-      jobId: job.id,
+        `Refresh queued for ${college.name}. The background worker will pick this up when you run ` +
+        `\`npm run scraper -- ${params.collegeSlug}\` or the nationwide ingest worker.`,
+      checkpointId: checkpoint.id,
+      stage: checkpoint.stage,
+      status: checkpoint.status,
     });
   } catch (err) {
     return handleRouteError(err);

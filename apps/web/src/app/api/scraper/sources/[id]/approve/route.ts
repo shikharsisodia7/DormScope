@@ -1,11 +1,12 @@
 import { prisma } from "@/lib/prisma";
-import { jsonOk, jsonError, handleRouteError, requireAdminKey } from "@/lib/api";
+import { requireAdminAuth } from "@/lib/admin-auth";
+import { jsonOk, jsonError, handleRouteError } from "@/lib/api";
 
 export const dynamic = "force-dynamic";
 
 export async function PATCH(req: Request, { params }: { params: { id: string } }) {
   try {
-    if (!requireAdminKey(req)) return jsonError("Unauthorized", 401);
+    if (!(await requireAdminAuth(req))) return jsonError("Unauthorized", 401);
     const source = await prisma.source.update({
       where: { id: params.id },
       data: { isApproved: true },

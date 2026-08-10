@@ -1,21 +1,18 @@
 import Link from "next/link";
 import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { fetchApi } from "@/lib/utils";
+import { getAdminOverview } from "@/lib/admin-data";
+import { requireAdminSession } from "@/lib/admin-auth";
 
 export default async function AdminPage() {
-  let overview: Record<string, unknown> = {};
-  try {
-    overview = await fetchApi("/api/admin/overview");
-  } catch {
-    overview = {};
-  }
+  await requireAdminSession();
+  const overview = await getAdminOverview();
 
   const stats = [
     { label: "Colleges", value: overview.colleges },
     { label: "Dorms", value: overview.dorms },
     { label: "Sources", value: overview.sources },
-    { label: "Scrape success", value: `${overview.scrapeSuccessRate ?? 0}%` },
-    { label: "Avg confidence", value: `${overview.avgConfidence ?? 0}%` },
+    { label: "Scrape success", value: `${overview.scrapeSuccessRate}%` },
+    { label: "Avg confidence", value: `${overview.avgConfidence}%` },
     { label: "Missing cost", value: overview.missingCost },
     { label: "Missing amenities", value: overview.missingAmenities },
     { label: "Failed jobs", value: overview.failedJobs },
@@ -37,16 +34,16 @@ export default async function AdminPage() {
       <div className="flex gap-4">
         <Link href="/admin/scraper" className="text-primary hover:underline">Scraper dashboard →</Link>
         <Link href="/admin/quality" className="text-primary hover:underline">Data quality →</Link>
-        <a href={`${process.env.NEXT_PUBLIC_API_URL || ""}/api/admin/export`} className="text-primary hover:underline">
+        <Link href="/api/admin/export" className="text-primary hover:underline">
           Export dataset
-        </a>
+        </Link>
       </div>
-      {(overview.duplicateWarnings as { a: string; b: string }[])?.length > 0 && (
+      {overview.duplicateWarnings.length > 0 && (
         <Card>
           <CardHeader><CardTitle>Duplicate warnings</CardTitle></CardHeader>
           <CardDescription>
             <ul className="list-disc pl-5 mt-2 space-y-1">
-              {(overview.duplicateWarnings as { a: string; b: string }[]).map((d, i) => (
+              {overview.duplicateWarnings.map((d, i) => (
                 <li key={i}>{d.a} ↔ {d.b}</li>
               ))}
             </ul>

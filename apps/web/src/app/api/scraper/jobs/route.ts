@@ -1,11 +1,12 @@
 import { prisma } from "@/lib/prisma";
-import { jsonOk, jsonError, handleRouteError, requireAdminKey } from "@/lib/api";
+import { requireAdminAuth } from "@/lib/admin-auth";
+import { jsonOk, jsonError, handleRouteError } from "@/lib/api";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(req: Request) {
   try {
-    if (process.env.ADMIN_API_KEY && !requireAdminKey(req)) {
+    if (!(await requireAdminAuth(req))) {
       return jsonError("Unauthorized", 401);
     }
 

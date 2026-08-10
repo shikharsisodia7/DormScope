@@ -15,12 +15,22 @@
     "seed": "tsx prisma/seed.ts",
     "studio": "prisma studio",
     "build": "prisma generate",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
     "import:institutions": "tsx scripts/import-institutions.ts",
     "seed:halls": "tsx scripts/seed-official-hall-directories.ts",
     "coverage": "tsx scripts/coverage-report.ts",
-    "backfill:eligibility": "tsx scripts/backfill-unknown-eligibility.ts"
+    "backfill:eligibility": "tsx scripts/backfill-unknown-eligibility.ts",
+    "audit:housing": "tsx scripts/audit-housing.ts",
+    "quarantine:junk": "tsx scripts/cleanup-junk-housing.ts",
+    "recompute:coverage": "tsx scripts/recompute-coverage.ts",
+    "recompute:scores": "tsx scripts/recompute-scores.ts",
+    "reconcile:sources": "tsx scripts/reconcile-sources.ts",
+    "find:duplicates": "tsx scripts/find-duplicates.ts",
+    "hierarchy:audit": "tsx scripts/hierarchy-audit.ts"
   },
   "dependencies": {
+    "@dormscope/scoring": "*",
+    "@dormscope/shared": "*",
     "@prisma/client": "^5.22.0"
   },
   "optionalDependencies": {

@@ -19,8 +19,8 @@ export function CollegeCharts({ dorms }: { dorms: DormCardData[] }) {
   ].filter((x) => x.count > 0);
 
   const scores = dorms
-    .filter((d) => d.dormScore)
-    .map((d) => ({ name: d.name.slice(0, 12), score: d.dormScore!.overallScore }));
+    .filter((d) => d.dormScore?.overallScore != null && d.dormScore.scoreable !== false)
+    .map((d) => ({ name: d.name.slice(0, 12), score: d.dormScore!.overallScore! }));
 
   if (!dorms.length) return null;
 

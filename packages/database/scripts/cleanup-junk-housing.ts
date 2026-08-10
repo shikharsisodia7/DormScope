@@ -1,43 +1,76 @@
 /**
- * Remove low-confidence junk housing rows created by over-accepting nav links.
- * Keeps entities with strong name evidence or seed provenance.
+ * Quarantine low-confidence junk housing rows (never hard-delete).
+ *
+ * Usage:
+ *   DATABASE_URL=... npm run quarantine:junk --workspace=@dormscope/database
+ *   APPLY=1 DATABASE_URL=... npm run quarantine:junk --workspace=@dormscope/database
  */
-import { PrismaClient } from "@prisma/client";
+import { createScriptPrisma, isApplyMode, printModeBanner } from "./lib/script-utils";
+import { findJunkCandidates } from "./lib/find-junk-candidates";
 
-const prisma = new PrismaClient();
-
-const KEEP =
-  /\b(hall|house|houses|quad|tower|villa|residence|dorm|commons|apartment|village|manor|lodge|court|inn|unit\s*\d+|complex|suite|mini-suite|foothill|stern|blackwell|jester|warren|dykstra|sproul|rieber|hedrick)\b/i;
-
-const JUNK =
-  /\b(faq|how to|contact|policy|policies|terms|conditions|apply|move-in|move-out|checklist|parking|dining|meal|health|safety|deadline|cancellation|appeal|staff|news|tour|guarantee|task force|bridge program|edge program|newly admitted|visiting scholar|furniture leasing|compare housing|housing by user|rates, contracts|cancellations|technology|cleaning|mail service|winter break|living with|living sustainably|front desk|my room|tours|optional apartment cleaning|bed bugs|missing student|assignment process|how to read|renewals|accommodations|dates &|spring housing|summer |off-campus)\b/i;
+const ACTOR = process.env.QUARANTINE_ACTOR ?? "cleanup-junk-housing";
 
 async function main() {
-  const dorms = await prisma.dorm.findMany({
-    where: { isVerified: false },
-    select: {
-      id: true,
-      name: true,
-      collegeId: true,
-      fieldProvenance: { select: { sourceId: true, confidence: true }, take: 3 },
-    },
-  });
+  const apply = isApplyMode();
+  printModeBanner(apply);
+  const prisma = createScriptPrisma();
 
-  let deleted = 0;
-  for (const d of dorms) {
-    if (KEEP.test(d.name) && !JUNK.test(d.name)) continue;
-    if (JUNK.test(d.name) || (!KEEP.test(d.name) && d.name.length > 40)) {
-      await prisma.dorm.delete({ where: { id: d.id } });
-      deleted += 1;
-      console.log(`- ${d.name}`);
+  try {
+    const candidates = await findJunkCandidates(prisma);
+    const byReason: Record<string, number> = {};
+    const byCollege: Record<string, { college: string; count: number; samples: string[] }> = {};
+
+    for (const c of candidates) {
+      byReason[c.reason] = (byReason[c.reason] ?? 0) + 1;
+      if (!byCollege[c.collegeSlug]) {
+        byCollege[c.collegeSlug] = { college: c.collegeName, count: 0, samples: [] };
+      }
+      byCollege[c.collegeSlug].count += 1;
+      if (byCollege[c.collegeSlug].samples.length < 3) {
+        byCollege[c.collegeSlug].samples.push(c.name);
+      }
     }
+
+    let quarantined = 0;
+    if (apply) {
+      const now = new Date();
+      for (const c of candidates) {
+        await prisma.dorm.update({
+          where: { id: c.id },
+          data: {
+            isActive: false,
+            dataQualityStatus: "QUARANTINED",
+            quarantineReason: c.reason,
+            quarantinedAt: now,
+            quarantinedBy: ACTOR,
+          },
+        });
+        quarantined += 1;
+      }
+    }
+
+    console.log(
+      JSON.stringify(
+        {
+          mode: apply ? "apply" : "dry_run",
+          scannedCandidates: candidates.length,
+          quarantined: apply ? quarantined : 0,
+          byReason,
+          byCollege: Object.entries(byCollege)
+            .sort((a, b) => b[1].count - a[1].count)
+            .slice(0, 20)
+            .map(([slug, row]) => ({ slug, ...row })),
+        },
+        null,
+        2
+      )
+    );
+  } finally {
+    await prisma.$disconnect();
   }
-  console.log(JSON.stringify({ scanned: dorms.length, deleted }, null, 2));
 }
 
-main()
-  .catch((e) => {
-    console.error(e);
-    process.exit(1);
-  })
-  .finally(() => prisma.$disconnect());
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});

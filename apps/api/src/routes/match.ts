@@ -31,11 +31,11 @@ function toRankable(d: {
   hasAC: boolean | null;
   bathroomStyle: string;
   dormType: string;
-  freshmanEligible: boolean;
-  upperclassEligible: boolean;
-  honorsHousing: boolean;
-  themedHousing: boolean;
-  genderInclusive: boolean;
+  freshmanEligible: boolean | null;
+  upperclassEligible: boolean | null;
+  honorsHousing: boolean | null;
+  themedHousing: boolean | null;
+  genderInclusive: boolean | null;
   substanceFree: boolean | null;
   elevatorAccess: boolean | null;
   laundryAccess: boolean | null;

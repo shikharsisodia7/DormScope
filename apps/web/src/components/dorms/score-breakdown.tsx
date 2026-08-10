@@ -15,27 +15,38 @@ const labels: Record<string, string> = {
   dataConfidenceScore: "Data confidence",
 };
 
-export function ScoreBreakdown({
-  score,
-}: {
-  score: {
-    overallScore: number;
-    valueScore: number;
-    comfortScore: number;
-    privacyScore: number;
-    socialScore: number;
-    convenienceScore: number;
-    freshmanFitScore: number;
-    amenityScore: number;
-    dataConfidenceScore: number;
-  };
-}) {
+export type ScoreBreakdownData = {
+  overallScore: number | null;
+  scoreable?: boolean;
+  valueScore: number | null;
+  comfortScore: number | null;
+  privacyScore: number | null;
+  socialScore: number | null;
+  convenienceScore: number | null;
+  freshmanFitScore: number | null;
+  amenityScore: number | null;
+  dataConfidenceScore: number | null;
+};
+
+function formatComponent(val: number | null | undefined): string {
+  return val == null ? "Unknown" : String(Math.round(val));
+}
+
+export function ScoreBreakdown({ score }: { score: ScoreBreakdownData }) {
   const [open, setOpen] = useState(false);
+  const hasOverall = score.overallScore != null && score.scoreable !== false;
 
   return (
     <Card>
       <CardHeader className="flex flex-row items-center justify-between">
-        <CardTitle>Why this score?</CardTitle>
+        <div>
+          <CardTitle>Why this score?</CardTitle>
+          {!hasOverall && (
+            <p className="mt-1 text-sm text-muted-foreground">
+              Not enough quality evidence to compute an overall score yet.
+            </p>
+          )}
+        </div>
         <Button variant="outline" size="sm" onClick={() => setOpen(!open)}>
           {open ? "Hide" : "Show"} breakdown
         </Button>
@@ -44,22 +55,30 @@ export function ScoreBreakdown({
         <CardContent>
           <div className="space-y-3">
             {Object.entries(labels).map(([key, label]) => {
-              const val = score[key as keyof typeof score] as number;
+              const val = score[key as keyof ScoreBreakdownData] as number | null | undefined;
+              const known = val != null;
               return (
                 <div key={key}>
                   <div className="flex justify-between text-sm mb-1">
                     <span>{label}</span>
-                    <span className="font-medium">{val}</span>
+                    <span className="font-medium">{formatComponent(val)}</span>
                   </div>
-                  <div className="h-2 bg-muted rounded-full overflow-hidden">
-                    <div className="h-full bg-primary rounded-full" style={{ width: `${val}%` }} />
-                  </div>
+                  {known ? (
+                    <div className="h-2 bg-muted rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-primary rounded-full"
+                        style={{ width: `${Math.min(100, Math.max(0, val))}%` }}
+                      />
+                    </div>
+                  ) : (
+                    <div className="h-2 bg-muted rounded-full" aria-hidden />
+                  )}
                 </div>
               );
             })}
           </div>
           <p className="text-xs text-muted-foreground mt-4">
-            Weighted blend: value 15%, comfort 15%, privacy 12%, social 10%, convenience 10%, freshman fit 13%, amenities 12%, data confidence 13%.
+            Quality components are weighted separately from data confidence. Data confidence reflects source quality, not housing quality.
           </p>
         </CardContent>
       )}

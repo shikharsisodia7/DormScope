@@ -76,14 +76,19 @@ export interface RankableDorm {
   confidenceScore?: number | null;
   dataCompletenessScore?: number | null;
   lastUpdatedAt?: Date | string | null;
+  /** When false, entity is organizational (e.g. village container) — exclude from Match. */
+  isAssignableHousingOption?: boolean | null;
+  /** When false, entity is informational only — exclude from Match rankings. */
+  rankingGranularity?: boolean | null;
   dormScore?: {
-    overallScore?: number;
-    valueScore?: number;
-    comfortScore?: number;
-    privacyScore?: number;
-    socialScore?: number;
-    convenienceScore?: number;
-    freshmanFitScore?: number;
+    overallScore?: number | null;
+    scoreable?: boolean;
+    valueScore?: number | null;
+    comfortScore?: number | null;
+    privacyScore?: number | null;
+    socialScore?: number | null;
+    convenienceScore?: number | null;
+    freshmanFitScore?: number | null;
   } | null;
 }
 
@@ -536,6 +541,16 @@ export function scoreDimension(
     default:
       return null;
   }
+}
+
+/**
+ * Match rankings include only assignable housing options at the correct granularity.
+ * Parent complexes/villages and informational child buildings are excluded.
+ */
+export function filterMatchableDorms<T extends RankableDorm>(dorms: T[]): T[] {
+  return dorms.filter(
+    (d) => d.isAssignableHousingOption !== false && d.rankingGranularity !== false
+  );
 }
 
 /**

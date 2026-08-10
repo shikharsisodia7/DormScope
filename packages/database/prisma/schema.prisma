@@ -98,6 +98,15 @@ enum HousingEntityKind {
   UNKNOWN
 }
 
+/// Publication / review state for scraped housing entities.
+enum DataQualityStatus {
+  ACTIVE
+  REVIEW
+  QUARANTINED
+  DUPLICATE
+  RETIRED
+}
+
 enum ReviewStatus {
   PENDING
   APPROVED
@@ -141,6 +150,9 @@ model College {
   officialName           String?
   shortName              String?
   dataFreshnessAt        DateTime?
+  lastCrawlAttemptAt     DateTime?
+  lastDiscoverySuccessAt DateTime?
+  lastInventorySuccessAt DateTime?
 
   dorms                  Dorm[]
   campuses               Campus[]
@@ -277,6 +289,10 @@ model Dorm {
   approximateResidents    Int?
   description             String?
   isActive                Boolean        @default(true)
+  dataQualityStatus       DataQualityStatus @default(ACTIVE)
+  quarantineReason        String?
+  quarantinedAt           DateTime?
+  quarantinedBy           String?
   effectiveFrom           DateTime?
   effectiveTo             DateTime?
   mealPlanRequired        Boolean?
@@ -294,6 +310,7 @@ model Dorm {
   comparisonItems         ComparisonItem[]
   fieldProvenance         FieldProvenance[]
   dataCorrections         DataCorrection[]
+  fieldConflicts         FieldConflict[]
   matchResults            MatchResult[]
   extractionDecisions     ExtractionDecision[]
 
@@ -307,6 +324,7 @@ model Dorm {
   @@index([parentHousingId])
   @@index([isAssignableHousingOption])
   @@index([entityKind])
+  @@index([dataQualityStatus])
 }
 
 model DormAlias {
@@ -440,6 +458,7 @@ model ExtractionDecision {
   confidence  Float    @default(0)
   reasons     Json
   pageUrl     String?
+  metadata    Json?
   createdAt   DateTime @default(now())
 
   @@index([collegeId, accepted])
@@ -464,12 +483,15 @@ model IngestCheckpoint {
   lastSuccessAt   DateTime?
   lockedAt        DateTime?
   lockOwner       String?
+  lastProcessedUrl String?
+  heartbeatAt     DateTime?
   metadata        Json?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
   @@index([status, nextRetryAt])
   @@index([stage])
+  @@index([lockOwner])
 }
 
 model FieldProvenance {
@@ -562,6 +584,28 @@ model ReviewSummary {
 
 // ─── Data Corrections ────────────────────────────────────────────────────────
 
+enum FieldConflictStatus {
+  OPEN
+  RESOLVED
+  DISMISSED
+}
+
+/// Conflicting field values from multiple sources awaiting resolution.
+model FieldConflict {
+  id        String              @id @default(cuid())
+  dormId    String
+  dorm      Dorm                @relation(fields: [dormId], references: [id], onDelete: Cascade)
+  fieldName String
+  status    FieldConflictStatus @default(OPEN)
+  values    Json
+  createdAt DateTime            @default(now())
+  updatedAt DateTime            @updatedAt
+
+  @@index([dormId])
+  @@index([dormId, fieldName])
+  @@index([status])
+}
+
 model DataCorrection {
   id            String           @id @default(cuid())
   dormId        String
@@ -586,15 +630,19 @@ model DormScore {
   id                  String   @id @default(cuid())
   dormId              String   @unique
   dorm                Dorm     @relation(fields: [dormId], references: [id], onDelete: Cascade)
-  overallScore        Float
-  valueScore          Float
-  comfortScore        Float
-  privacyScore        Float
-  socialScore         Float
-  convenienceScore    Float
-  freshmanFitScore    Float
-  amenityScore        Float
-  dataConfidenceScore Float
+  /// Null when insufficient quality evidence to display an overall score.
+  overallScore        Float?
+  valueScore          Float?
+  comfortScore        Float?
+  privacyScore        Float?
+  socialScore         Float?
+  convenienceScore    Float?
+  freshmanFitScore    Float?
+  amenityScore        Float?
+  dataConfidenceScore Float?
+  evidenceCompleteness Float?
+  scoreable           Boolean  @default(false)
+  algorithmVersion    String?
   breakdown           Json?
   calculatedAt        DateTime @default(now())
 }

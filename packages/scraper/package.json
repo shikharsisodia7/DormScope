@@ -13,8 +13,10 @@
   "scripts": {
     "start": "tsx src/cli.ts",
     "dev": "tsx watch src/cli.ts",
+    "typecheck": "tsc --noEmit",
     "ingest:sample": "tsx scripts/ingest-sample-colleges.ts",
     "ingest:nationwide": "tsx scripts/bulk-ingest-nationwide.ts",
+    "worker": "tsx scripts/worker.ts",
     "test": "vitest run",
     "test:watch": "vitest"
   },

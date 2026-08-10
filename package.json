@@ -19,13 +19,22 @@
     "db:import-institutions": "npm run import:institutions --workspace=@dormscope/database",
     "db:seed-halls": "npm run seed:halls --workspace=@dormscope/database",
     "db:coverage": "npm run coverage --workspace=@dormscope/database",
+    "db:audit-housing": "npm run audit:housing --workspace=@dormscope/database",
+    "db:quarantine-junk": "npm run quarantine:junk --workspace=@dormscope/database",
+    "db:recompute-coverage": "npm run recompute:coverage --workspace=@dormscope/database",
+    "db:recompute-scores": "npm run recompute:scores --workspace=@dormscope/database",
+    "db:reconcile-sources": "npm run reconcile:sources --workspace=@dormscope/database",
+    "db:find-duplicates": "npm run find:duplicates --workspace=@dormscope/database",
+    "db:hierarchy-audit": "npm run hierarchy:audit --workspace=@dormscope/database",
     "scraper": "npm run start --workspace=@dormscope/scraper",
     "scraper:ingest-sample": "npm run ingest:sample --workspace=@dormscope/scraper",
     "scraper:nationwide": "npm run ingest:nationwide --workspace=@dormscope/scraper",
+    "scraper:worker": "npm run worker --workspace=@dormscope/scraper",
     "db:backfill-eligibility": "tsx packages/database/scripts/backfill-unknown-eligibility.ts",
-    "test": "npm run test --workspace=@dormscope/scoring && npm run test --workspace=@dormscope/scraper",
-    "typecheck": "tsc -p packages/shared --noEmit && tsc -p packages/scoring --noEmit && tsc -p packages/scraper --noEmit --pretty false || true",
-    "check": "npm test && npm run lint",
+    "test": "npm run test --workspace=@dormscope/scoring && npm run test --workspace=@dormscope/scraper && npm run test --workspace=@dormscope/web",
+    "typecheck": "npm run typecheck --workspace=@dormscope/shared && npm run typecheck --workspace=@dormscope/scoring && npm run typecheck --workspace=@dormscope/scraper && npm run typecheck --workspace=@dormscope/database && npm run typecheck --workspace=@dormscope/web && npm run typecheck --workspace=@dormscope/api",
+    "check": "npm run typecheck && npm test && npm run lint",
+    "release:check": "npm run typecheck && npm test && npm run lint && npm run build",
     "lint": "turbo run lint"
   },
   "devDependencies": {
@@ -34,5 +43,6 @@
   },
   "engines": {
     "node": ">=20"
-  }
+  },
+  "packageManager": "npm@10.9.2"
 }

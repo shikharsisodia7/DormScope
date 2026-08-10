@@ -1,12 +1,13 @@
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { jsonOk, jsonError, handleRouteError, requireAdminKey, parsePagination } from "@/lib/api";
+import { requireAdminAuth } from "@/lib/admin-auth";
+import { jsonOk, jsonError, handleRouteError, parsePagination } from "@/lib/api";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(req: Request) {
   try {
-    if (!requireAdminKey(req)) return jsonError("Unauthorized", 401);
+    if (!(await requireAdminAuth(req))) return jsonError("Unauthorized", 401);
     const { searchParams } = new URL(req.url);
     const status = searchParams.get("status") ?? "PENDING";
     const { page, pageSize, skip } = parsePagination(searchParams);
@@ -38,7 +39,7 @@ const moderateSchema = z.object({
 
 export async function PATCH(req: Request) {
   try {
-    if (!requireAdminKey(req)) return jsonError("Unauthorized", 401);
+    if (!(await requireAdminAuth(req))) return jsonError("Unauthorized", 401);
     const input = moderateSchema.parse(await req.json());
 
     const review = await prisma.review.update({

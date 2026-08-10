@@ -146,15 +146,16 @@ export interface DormBadge {
 }
 
 export interface ScoreBreakdown {
-  overallScore: number;
-  valueScore: number;
-  comfortScore: number;
-  privacyScore: number;
-  socialScore: number;
-  convenienceScore: number;
-  freshmanFitScore: number;
-  amenityScore: number;
-  dataConfidenceScore: number;
+  overallScore: number | null;
+  scoreable?: boolean;
+  valueScore: number | null;
+  comfortScore: number | null;
+  privacyScore: number | null;
+  socialScore: number | null;
+  convenienceScore: number | null;
+  freshmanFitScore: number | null;
+  amenityScore: number | null;
+  dataConfidenceScore: number | null;
   /** Fraction of score components that had real evidence (0–1) */
   completeness?: number;
 }

@@ -77,7 +77,11 @@ export default async function DormProfilePage({
         {dorm.dormScore && (
           <div className="text-center">
             <p className="text-xs uppercase tracking-wide text-muted-foreground">DormScope Score</p>
-            <p className="font-display text-5xl text-primary tabular-nums">{dorm.dormScore.overallScore}</p>
+            {dorm.dormScore.overallScore != null && dorm.dormScore.scoreable !== false ? (
+              <p className="font-display text-5xl text-primary tabular-nums">{dorm.dormScore.overallScore}</p>
+            ) : (
+              <p className="mt-1 text-sm text-muted-foreground max-w-[8rem]">More data needed</p>
+            )}
           </div>
         )}
       </header>
@@ -110,7 +114,7 @@ export default async function DormProfilePage({
                   rel="noopener noreferrer"
                   className="mt-3 inline-block text-sm text-primary underline-offset-4 hover:underline"
                 >
-                  Official hall page
+                  Official housing page
                 </a>
               )}
             </section>

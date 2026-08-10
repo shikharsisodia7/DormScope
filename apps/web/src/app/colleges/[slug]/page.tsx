@@ -17,7 +17,7 @@ export async function generateMetadata({
   if (!data) return { title: "College not found" };
   return {
     title: `${data.name} dorms`,
-    description: `Explore residence halls at ${data.name} in ${data.city}, ${data.state}. Compare amenities, costs, and find your best dorm fit.`,
+    description: `Explore housing options at ${data.name} in ${data.city}, ${data.state}. Compare amenities, costs, and find your best dorm fit.`,
   };
 }
 

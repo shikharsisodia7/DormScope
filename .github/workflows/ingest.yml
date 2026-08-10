@@ -1,0 +1,69 @@
+name: Ingest
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Ingest mode (nationwide|discovery|partial|retry|blocked|state|slugs|stale|validate)"
+        required: true
+        default: retry
+        type: choice
+        options:
+          - nationwide
+          - discovery
+          - partial
+          - retry
+          - blocked
+          - state
+          - slugs
+          - stale
+          - validate
+      state:
+        description: "US state code (optional, for state mode)"
+        required: false
+        type: string
+      limit:
+        description: "Max colleges to process"
+        required: false
+        default: "50"
+        type: string
+      concurrency:
+        description: "Parallel scrape workers"
+        required: false
+        default: "2"
+        type: string
+      slugs:
+        description: "Comma-separated college slugs (optional)"
+        required: false
+        type: string
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma client
+        run: npm run db:generate
+
+      - name: Run ingest
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          MODE: ${{ inputs.mode }}
+          STATE: ${{ inputs.state }}
+          LIMIT: ${{ inputs.limit }}
+          CONCURRENCY: ${{ inputs.concurrency }}
+          SLUGS: ${{ inputs.slugs }}
+          SCRAPER_ENABLE_PLAYWRIGHT: "1"
+        run: npm run scraper:nationwide

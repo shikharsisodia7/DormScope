@@ -3,6 +3,7 @@ import { normalizeAC, normalizeBathroom, parsePrice } from "@dormscope/shared";
 import {
   classifyHousingCandidate,
   classifyPageRoles,
+  classifyPageRolesFromSignals,
   type ClassificationResult,
   type PageRole,
 } from "./classifyHousing.js";
@@ -25,6 +26,7 @@ export interface ParseHousingResult {
   pageRoles: PageRole[];
   accepted: ExtractedDorm[];
   rejected: Array<{ name: string; classification: ClassificationResult }>;
+  spaSignals: boolean;
 }
 
 function cleanName(raw: string): string {
@@ -33,9 +35,18 @@ function cleanName(raw: string): string {
 
 function amenitiesFromText(text: string): string[] {
   const amenities: string[] = [];
-  if (normalizeAC(text)) amenities.push("ac");
-  if (/laundry/i.test(text)) amenities.push("laundry");
-  if (/kitchen/i.test(text)) amenities.push("kitchen");
+  const ac = normalizeAC(text);
+  if (ac === true) amenities.push("ac");
+  if (ac === false) amenities.push("no_ac");
+  if (/no\s+(?:in[- ]?unit\s+)?(?:air conditioning|a\/?c)\b/i.test(text)) {
+    if (!amenities.includes("no_ac")) amenities.push("no_ac");
+  }
+  if (/\bno elevator\b/i.test(text)) amenities.push("no_elevator");
+  else if (/\belevator\b/i.test(text)) amenities.push("elevator");
+  if (/\bno (?:in[- ]?unit )?kitchen\b/i.test(text)) amenities.push("no_kitchen");
+  else if (/kitchen/i.test(text)) amenities.push("kitchen");
+  if (/\bno laundry\b/i.test(text)) amenities.push("no_laundry");
+  else if (/laundry/i.test(text)) amenities.push("laundry");
   if (/study lounge/i.test(text)) amenities.push("study_lounge");
   return amenities;
 }
@@ -73,13 +84,64 @@ function titleFromSlug(href: string): string | null {
   }
 }
 
+function detectSpaSignals(html: string, $: ReturnType<typeof cheerio.load>): boolean {
+  if (
+    /__NEXT_DATA__|__NUXT__|ng-version|data-reactroot|id=["']__next["']|id=["']app["']\s*>\s*<\/div>/i.test(
+      html
+    )
+  ) {
+    return true;
+  }
+  const mainText = ($("main").text() || $("body").text()).replace(/\s+/g, " ").trim();
+  if (mainText.length < 200 && (html.match(/<script/gi) ?? []).length >= 8) return true;
+  if (/loading\.\.\.|please wait|skeleton|hydrat/i.test(mainText) && mainText.length < 800) {
+    return true;
+  }
+  return false;
+}
+
+type ChromeRole = "main" | "nav" | "header" | "footer" | "aside" | "unknown";
+
+function chromeRole($el: cheerio.Cheerio<any>): ChromeRole {
+  if (
+    $el.closest(
+      "nav, [role='navigation'], .nav, .navbar, .menu, .mega-menu, .breadcrumb, .breadcrumbs"
+    ).length
+  ) {
+    return "nav";
+  }
+  if ($el.closest("header").length) return "header";
+  if ($el.closest("footer").length) return "footer";
+  if ($el.closest("aside, .sidebar, .utility-nav, .cookie, #cookie").length) return "aside";
+  if ($el.closest("main, [role='main'], #main, #content, .main-content").length) return "main";
+  return "unknown";
+}
+
 /**
  * Extract housing entities using contextual classification (not Hall-name gating).
+ * Prefer <main> content; skip site chrome for candidate discovery.
  */
 export function parseHousingHtmlDetailed(html: string, baseUrl: string): ParseHousingResult {
   const $ = cheerio.load(html);
-  const pageText = $("body").text().replace(/\s+/g, " ").slice(0, 12000);
-  const pageRoles = classifyPageRoles(baseUrl, pageText);
+  const spaSignals = detectSpaSignals(html, $);
+
+  const title = $("title").first().text().trim();
+  const h1 = $("h1").first().text().trim();
+  const ogTitle = $('meta[property="og:title"]').attr("content") ?? "";
+  const breadcrumbs = $(".breadcrumb, .breadcrumbs, nav[aria-label*='breadcrumb' i]").text();
+  const mainHeadings = ($("main h1, main h2, main h3").text() || $("h1, h2").text()).slice(0, 1500);
+  const pageText = ($("main").text() || $("body").text()).replace(/\s+/g, " ").slice(0, 12000);
+
+  const pageRoles = classifyPageRolesFromSignals({
+    url: baseUrl,
+    title,
+    h1,
+    ogTitle,
+    breadcrumbs,
+    mainHeadings,
+    bodySample: pageText,
+  });
+
   const accepted: ExtractedDorm[] = [];
   const rejected: Array<{ name: string; classification: ClassificationResult }> = [];
   const seen = new Set<string>();
@@ -93,10 +155,15 @@ export function parseHousingHtmlDetailed(html: string, baseUrl: string): ParseHo
       structuralRole?: "heading" | "card_title" | "link" | "table_cell" | "select_option" | "other";
       links?: string[];
       imageUrl?: string;
+      pageRole?: ChromeRole;
+      selectorType?: string;
+      parentNameHint?: string;
+      officialCategoryLabel?: string;
     }
   ) => {
     const name = cleanName(rawName);
     if (!name || seen.has(name.toLowerCase())) return;
+
     const classification = classifyHousingCandidate(name, {
       pageUrl: baseUrl,
       pageRoles,
@@ -104,6 +171,8 @@ export function parseHousingHtmlDetailed(html: string, baseUrl: string): ParseHo
       href: opts.href,
       inRepeatedStructure: opts.inRepeatedStructure,
       structuralRole: opts.structuralRole,
+      pageRole: opts.pageRole,
+      selectorType: opts.selectorType,
     });
     if (!classification.accepted) {
       rejected.push({ name, classification });
@@ -120,10 +189,13 @@ export function parseHousingHtmlDetailed(html: string, baseUrl: string): ParseHo
       entityKindHint: classification.entityKindHint,
       classification,
       detailUrl: opts.href,
+      parentNameHint: opts.parentNameHint,
+      officialCategoryLabel: opts.officialCategoryLabel,
     });
   };
 
-  // Repeated cards / list items — strongest directory signal
+  const root = $("main").length ? $("main") : $("body");
+
   const cardSelectors = [
     "article",
     ".card",
@@ -131,19 +203,21 @@ export function parseHousingHtmlDetailed(html: string, baseUrl: string): ParseHo
     ".teaser",
     "[class*='housing-card']",
     "[class*='residence-card']",
-    "li.menu-item",
     ".accordion-item",
     "table tbody tr",
   ];
+
   for (const sel of cardSelectors) {
-    const nodes = $(sel);
+    const nodes = root.find(sel);
     const repeated = nodes.length >= 3;
     nodes.each((_, el) => {
       const $el = $(el);
-      const title =
+      const role = chromeRole($el);
+      if (role === "nav" || role === "footer" || role === "header") return;
+      const titleText =
         cleanName($el.find("h1,h2,h3,h4,.title,.card-title,a").first().text()) ||
         cleanName($el.find("td").first().text());
-      if (!title) return;
+      if (!titleText) return;
       const href = $el.find("a[href]").first().attr("href");
       let absolute: string | undefined;
       if (href) {
@@ -162,31 +236,49 @@ export function parseHousingHtmlDetailed(html: string, baseUrl: string): ParseHo
           /* ignore */
         }
       }
-      consider(title, {
+      const sectionHeading = cleanName(
+        $el.closest("section, .section").find("h1,h2,h3").first().text()
+      );
+      consider(titleText, {
         surroundingText: $el.text(),
         href: absolute,
         inRepeatedStructure: repeated,
         structuralRole: sel.includes("tr") ? "table_cell" : "card_title",
         links: absolute ? [absolute] : [],
         imageUrl,
+        pageRole: role,
+        selectorType: sel,
+        officialCategoryLabel: sectionHeading || undefined,
+        parentNameHint:
+          /village|college|complex|community|unit/i.test(sectionHeading) &&
+          sectionHeading !== titleText
+            ? sectionHeading
+            : undefined,
       });
     });
   }
 
-  // Headings
-  $("h1, h2, h3, h4").each((_, el) => {
-    const name = cleanName($(el).text());
-    const section = $(el).parent();
+  root.find("h1, h2, h3, h4").each((_, el) => {
+    const $el = $(el);
+    const role = chromeRole($el);
+    if (role === "nav" || role === "footer" || role === "header") return;
+    const name = cleanName($el.text());
+    const section = $el.parent();
+    const siblingCards = section.find("article, .card, li, tr").length;
     consider(name, {
       surroundingText: section.text(),
-      inRepeatedStructure: false,
+      inRepeatedStructure: siblingCards >= 3,
       structuralRole: "heading",
+      pageRole: role === "unknown" && $("main").length ? "main" : role,
+      selectorType: "heading",
     });
   });
 
-  // Housing-path links (Unit 1 / Unit 2 style menus)
-  $("a[href]").each((_, a) => {
-    const href = $(a).attr("href");
+  root.find("a[href]").each((_, a) => {
+    const $a = $(a);
+    const role = chromeRole($a);
+    if (role === "nav" || role === "footer" || role === "header") return;
+    const href = $a.attr("href");
     if (!href) return;
     let absolute: string;
     try {
@@ -194,30 +286,35 @@ export function parseHousingHtmlDetailed(html: string, baseUrl: string): ParseHo
     } catch {
       return;
     }
-    const linkText = cleanName($(a).text());
+    const linkText = cleanName($a.text());
     const fromSlug = titleFromSlug(absolute);
     const name = linkText.length >= 2 ? linkText : fromSlug;
     if (!name) return;
-    if (!/housing|residenc|living|unit|apartment|hall|dorm|village|commons/i.test(absolute + " " + name)) {
+    if (
+      !/housing|residenc|living|unit|apartment|hall|dorm|village|commons/i.test(absolute + " " + name)
+    ) {
       return;
     }
     consider(name, {
-      surroundingText: linkText,
+      surroundingText: $a.parent().text().slice(0, 400) || linkText,
       href: absolute,
       inRepeatedStructure: true,
       structuralRole: "link",
       links: [absolute],
+      pageRole: role === "unknown" && $("main").length ? "main" : role,
+      selectorType: "a[href]",
     });
   });
 
-  // <select> options on housing forms
-  $("select option").each((_, opt) => {
+  root.find("select option").each((_, opt) => {
     const name = cleanName($(opt).text());
     if (!name || /select|choose|please/i.test(name)) return;
     consider(name, {
       surroundingText: "housing select option room assignment",
       inRepeatedStructure: true,
       structuralRole: "select_option",
+      pageRole: "main",
+      selectorType: "select option",
     });
   });
 
@@ -225,6 +322,7 @@ export function parseHousingHtmlDetailed(html: string, baseUrl: string): ParseHo
     pageRoles,
     accepted: accepted.slice(0, 120),
     rejected: rejected.slice(0, 80),
+    spaSignals,
   };
 }
 
@@ -233,16 +331,34 @@ export function parseHousingHtml(html: string, baseUrl: string): ExtractedDorm[]
   return parseHousingHtmlDetailed(html, baseUrl).accepted;
 }
 
-export function parsePageMetadata(html: string, baseUrl?: string): { title: string; links: string[]; pageRoles: PageRole[] } {
+export function parsePageMetadata(
+  html: string,
+  baseUrl?: string
+): { title: string; links: string[]; pageRoles: PageRole[] } {
   const $ = cheerio.load(html);
   const title = $("title").text().trim();
-  const pageRoles = classifyPageRoles(baseUrl ?? "", $("body").text());
+  const pageRoles = classifyPageRolesFromSignals({
+    url: baseUrl ?? "",
+    title,
+    h1: $("h1").first().text(),
+    bodySample: ($("main").text() || $("body").text()).slice(0, 4000),
+  });
   const links: string[] = [];
-  $("a[href]").each((_, a) => {
-    const href = $(a).attr("href");
+  const linkRoot = $("main").length ? $("main") : $("body");
+  linkRoot.find("a[href]").each((_, a) => {
+    const $a = $(a);
+    if ($a.closest("nav, footer, header").length) return;
+    const href = $a.attr("href");
     if (!href) return;
-    const text = $(a).text();
-    if (!/housing|residence|dorm|room|board|rates|res[\s-]?life|living|unit|apartment|village/i.test(href + " " + text)) {
+    const text = $a.text();
+    if (
+      !/housing|residence|dorm|room|board|rates|res[\s-]?life|living|unit|apartment|village/i.test(
+        href + " " + text
+      )
+    ) {
+      return;
+    }
+    if (/instagram|facebook|twitter|linkedin|youtube|google\.com\/maps|yelp|airbnb/i.test(href)) {
       return;
     }
     try {
@@ -254,4 +370,9 @@ export function parsePageMetadata(html: string, baseUrl?: string): { title: stri
   return { title, links: Array.from(new Set(links)).slice(0, 60), pageRoles };
 }
 
-export { normalizeBathroom, classifyHousingCandidate, classifyPageRoles };
+export {
+  normalizeBathroom,
+  classifyHousingCandidate,
+  classifyPageRoles,
+  classifyPageRolesFromSignals,
+};

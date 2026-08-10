@@ -3,6 +3,7 @@ import { PreferenceImportance, type PreferenceProfile } from "@dormscope/shared"
 import {
   ALGORITHM_VERSION,
   filterByHardConstraints,
+  filterMatchableDorms,
   rankDormsForPreferences,
   type RankableDorm,
 } from "./personalizedRanker";
@@ -133,6 +134,58 @@ describe("filterByHardConstraints", () => {
     expect(eligible.map((d) => d.id)).toEqual(["cheap"]);
     expect(excluded.map((e) => e.dorm.id)).toContain("pricey");
     expect(unverified.map((u) => u.dorm.id)).toContain("unk-cost");
+  });
+});
+
+describe("filterMatchableDorms", () => {
+  it("Residential Village parent with Building A/B assignable — only A/B in match", () => {
+    const hierarchy: RankableDorm[] = [
+      dorm({
+        id: "village",
+        name: "Residential Village",
+        isAssignableHousingOption: false,
+        rankingGranularity: false,
+      }),
+      dorm({
+        id: "building-a",
+        name: "Building A",
+        isAssignableHousingOption: true,
+        rankingGranularity: true,
+      }),
+      dorm({
+        id: "building-b",
+        name: "Building B",
+        isAssignableHousingOption: true,
+        rankingGranularity: true,
+      }),
+    ];
+    const matchable = filterMatchableDorms(hierarchy);
+    expect(matchable.map((d) => d.id)).toEqual(["building-a", "building-b"]);
+  });
+
+  it("Unit 1 assignable parent with informational child buildings — only Unit 1 in match", () => {
+    const hierarchy: RankableDorm[] = [
+      dorm({
+        id: "unit-1",
+        name: "Unit 1",
+        isAssignableHousingOption: true,
+        rankingGranularity: true,
+      }),
+      dorm({
+        id: "child-a",
+        name: "Building A",
+        isAssignableHousingOption: false,
+        rankingGranularity: false,
+      }),
+      dorm({
+        id: "child-b",
+        name: "Building B",
+        isAssignableHousingOption: false,
+        rankingGranularity: false,
+      }),
+    ];
+    const matchable = filterMatchableDorms(hierarchy);
+    expect(matchable.map((d) => d.id)).toEqual(["unit-1"]);
   });
 });
 

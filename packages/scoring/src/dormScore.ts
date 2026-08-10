@@ -1,3 +1,13 @@
+/**
+ * Null-safe dorm quality scoring.
+ * Data confidence is tracked separately and does NOT inflate housing quality.
+ * Sparse records return overallScore=null (not a fake 0 or 95).
+ */
+export const DORMSCOPE_SCORE_VERSION = "2.0.0";
+
+/** Minimum known quality dimensions (excluding confidence) required to display overall. */
+export const MIN_QUALITY_EVIDENCE = 3;
+
 export interface DormScoreInput {
   yearlyCost?: number | null;
   collegeAvgCost?: number | null;
@@ -14,7 +24,9 @@ export interface DormScoreInput {
 }
 
 export interface ComputedDormScore {
-  overallScore: number;
+  /** Null when insufficient quality evidence. */
+  overallScore: number | null;
+  scoreable: boolean;
   valueScore: number | null;
   comfortScore: number | null;
   privacyScore: number | null;
@@ -23,8 +35,9 @@ export interface ComputedDormScore {
   freshmanFitScore: number | null;
   amenityScore: number | null;
   dataConfidenceScore: number | null;
-  /** Fraction of components that had real evidence (0–1) */
+  /** Fraction of quality components that had real evidence (0–1), excluding confidence. */
   completeness: number;
+  algorithmVersion: string;
   breakdown: Record<string, number | null>;
 }
 
@@ -42,28 +55,20 @@ function normalizeBathroom(style: string | null | undefined): string | null {
   return s;
 }
 
-/**
- * Null-safe dorm score. Unknown/null fields are omitted from the weighted average
- * (they reduce completeness, never invent mid-values like vibe=5 or cost=15000).
- */
 export function computeDormScore(input: DormScoreInput): ComputedDormScore {
-  const components: Array<{ key: string; score: number | null; weight: number }> = [];
+  const quality: Array<{ key: string; score: number | null; weight: number }> = [];
 
-  // Value — only when yearly cost is known. Do NOT invent collegeAvgCost as cost.
   let valueScore: number | null = null;
   if (input.yearlyCost != null && Number.isFinite(input.yearlyCost)) {
     if (input.collegeAvgCost != null && input.collegeAvgCost > 0) {
       const avg = input.collegeAvgCost;
       valueScore = clamp(100 - ((input.yearlyCost - avg * 0.8) / avg) * 80, 0, 100);
     } else {
-      const lo = 8000;
-      const hi = 22000;
-      valueScore = clamp(100 - ((input.yearlyCost - lo) / (hi - lo)) * 100, 0, 100);
+      valueScore = clamp(100 - ((input.yearlyCost - 8000) / (22000 - 8000)) * 100, 0, 100);
     }
   }
-  components.push({ key: "valueScore", score: valueScore, weight: 0.15 });
+  quality.push({ key: "valueScore", score: valueScore, weight: 0.18 });
 
-  // Comfort — AC and bathroom style; skip pieces that are unknown
   let comfortScore: number | null = null;
   {
     const parts: number[] = [];
@@ -73,13 +78,10 @@ export function computeDormScore(input: DormScoreInput): ComputedDormScore {
     if (bath === "PRIVATE") parts.push(95);
     else if (bath === "SUITE") parts.push(75);
     else if (bath === "COMMUNAL") parts.push(45);
-    if (parts.length > 0) {
-      comfortScore = parts.reduce((a, b) => a + b, 0) / parts.length;
-    }
+    if (parts.length > 0) comfortScore = parts.reduce((a, b) => a + b, 0) / parts.length;
   }
-  components.push({ key: "comfortScore", score: comfortScore, weight: 0.15 });
+  quality.push({ key: "comfortScore", score: comfortScore, weight: 0.18 });
 
-  // Privacy — rating or known bathroom style only
   let privacyScore: number | null = null;
   if (input.privacyRating != null && Number.isFinite(input.privacyRating)) {
     privacyScore = clamp(input.privacyRating * 10, 0, 100);
@@ -89,9 +91,8 @@ export function computeDormScore(input: DormScoreInput): ComputedDormScore {
     else if (bath === "SUITE") privacyScore = 65;
     else if (bath === "COMMUNAL") privacyScore = 35;
   }
-  components.push({ key: "privacyScore", score: privacyScore, weight: 0.12 });
+  quality.push({ key: "privacyScore", score: privacyScore, weight: 0.14 });
 
-  // Social — never default vibe to 5
   const socialScore =
     input.socialVibe != null && Number.isFinite(input.socialVibe)
       ? clamp(input.socialVibe * 10, 0, 100)
@@ -100,9 +101,8 @@ export function computeDormScore(input: DormScoreInput): ComputedDormScore {
   if (socialScore != null && input.quietVibe != null && input.quietVibe > 7) {
     socialWithQuiet = clamp(socialScore + 10, 0, 100);
   }
-  components.push({ key: "socialScore", score: socialWithQuiet, weight: 0.1 });
+  quality.push({ key: "socialScore", score: socialWithQuiet, weight: 0.12 });
 
-  // Convenience — only when dining distance is known (do NOT invent 500m)
   let convenienceScore: number | null = null;
   if (input.diningDistanceMeters != null && Number.isFinite(input.diningDistanceMeters)) {
     if (input.diningDistanceMeters < 300) convenienceScore = 85;
@@ -110,42 +110,36 @@ export function computeDormScore(input: DormScoreInput): ComputedDormScore {
     else if (input.diningDistanceMeters < 1000) convenienceScore = 55;
     else convenienceScore = 35;
   }
-  components.push({ key: "convenienceScore", score: convenienceScore, weight: 0.1 });
+  quality.push({ key: "convenienceScore", score: convenienceScore, weight: 0.12 });
 
-  // Freshman fit — only when eligibility is known
   const freshmanFitScore =
     input.freshmanEligible === true ? 85 : input.freshmanEligible === false ? 45 : null;
-  components.push({ key: "freshmanFitScore", score: freshmanFitScore, weight: 0.13 });
+  quality.push({ key: "freshmanFitScore", score: freshmanFitScore, weight: 0.14 });
 
-  // Amenities — only when count is known (do NOT invent amenityCount=3)
   const amenityScore =
     input.amenityCount != null && Number.isFinite(input.amenityCount)
       ? clamp((input.amenityCount / 8) * 100, 0, 100)
       : null;
-  components.push({ key: "amenityScore", score: amenityScore, weight: 0.12 });
+  quality.push({ key: "amenityScore", score: amenityScore, weight: 0.12 });
 
-  // Data confidence — null if neither signal present
+  // Confidence is tracked separately — never mixed into quality overall.
   let dataConfidenceScore: number | null = null;
   if (input.confidenceScore != null && Number.isFinite(input.confidenceScore)) {
     dataConfidenceScore = Math.round(
       input.confidenceScore <= 1 ? input.confidenceScore * 100 : input.confidenceScore
     );
-  } else if (
-    input.dataCompletenessScore != null &&
-    Number.isFinite(input.dataCompletenessScore)
-  ) {
+  } else if (input.dataCompletenessScore != null && Number.isFinite(input.dataCompletenessScore)) {
     dataConfidenceScore = Math.round(
       input.dataCompletenessScore <= 1
         ? input.dataCompletenessScore * 100
         : input.dataCompletenessScore
     );
   }
-  components.push({ key: "dataConfidenceScore", score: dataConfidenceScore, weight: 0.13 });
 
   let weightedSum = 0;
   let weightTotal = 0;
   let known = 0;
-  for (const c of components) {
+  for (const c of quality) {
     if (c.score != null) {
       weightedSum += c.score * c.weight;
       weightTotal += c.weight;
@@ -153,14 +147,14 @@ export function computeDormScore(input: DormScoreInput): ComputedDormScore {
     }
   }
 
-  const overallScore =
-    weightTotal > 0 ? Math.round(clamp(weightedSum / weightTotal, 0, 100)) : 0;
-  const completeness = components.length > 0 ? known / components.length : 0;
-
+  const completeness = quality.length > 0 ? known / quality.length : 0;
+  const scoreable = known >= MIN_QUALITY_EVIDENCE && weightTotal > 0;
+  const overallScore = scoreable ? Math.round(clamp(weightedSum / weightTotal, 0, 100)) : null;
   const roundOrNull = (n: number | null) => (n == null ? null : Math.round(n));
 
   return {
     overallScore,
+    scoreable,
     valueScore: roundOrNull(valueScore),
     comfortScore: roundOrNull(comfortScore),
     privacyScore: roundOrNull(privacyScore),
@@ -170,6 +164,7 @@ export function computeDormScore(input: DormScoreInput): ComputedDormScore {
     amenityScore: roundOrNull(amenityScore),
     dataConfidenceScore: dataConfidenceScore != null ? Math.round(dataConfidenceScore) : null,
     completeness,
+    algorithmVersion: DORMSCOPE_SCORE_VERSION,
     breakdown: {
       valueScore,
       comfortScore,
@@ -185,6 +180,10 @@ export function computeDormScore(input: DormScoreInput): ComputedDormScore {
 
 export function explainScore(score: ComputedDormScore): string[] {
   const lines: string[] = [];
+  if (!score.scoreable || score.overallScore == null) {
+    lines.push("Not enough data to compute a DormScope quality score yet.");
+    return lines;
+  }
   if (score.valueScore != null && score.valueScore >= 70) {
     lines.push("Strong value relative to typical costs at this school.");
   } else if (score.valueScore != null && score.valueScore < 45) {

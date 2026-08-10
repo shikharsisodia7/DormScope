@@ -20,10 +20,11 @@ interface CompareDorm {
   laundryAccess?: boolean | null;
   college: { name: string; slug?: string };
   dormScore?: {
-    overallScore: number;
-    valueScore: number;
-    privacyScore: number;
-    comfortScore: number;
+    overallScore: number | null;
+    valueScore?: number | null;
+    privacyScore?: number | null;
+    comfortScore?: number | null;
+    scoreable?: boolean;
   } | null;
 }
 
