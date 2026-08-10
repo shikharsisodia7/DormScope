@@ -139,6 +139,19 @@ export interface SafeFetchResult {
   finalUrl: string;
   status: number;
   contentHash?: string;
+  retryAfterMs?: number;
+  headers?: Record<string, string>;
+}
+
+const MAX_HTML_BYTES = Number(process.env.SCRAPER_MAX_HTML_BYTES ?? 5_000_000);
+
+export function parseRetryAfter(header: string | null): number | undefined {
+  if (!header) return undefined;
+  const seconds = Number(header);
+  if (Number.isFinite(seconds) && seconds >= 0) return Math.min(seconds * 1000, 24 * 60 * 60 * 1000);
+  const date = Date.parse(header);
+  if (!Number.isNaN(date)) return Math.max(0, Math.min(date - Date.now(), 24 * 60 * 60 * 1000));
+  return undefined;
 }
 
 /**
@@ -150,9 +163,11 @@ export async function fetchHtmlSafe(
     userAgent?: string;
     maxRedirects?: number;
     timeoutMs?: number;
+    maxBytes?: number;
   } = {}
 ): Promise<SafeFetchResult> {
   const maxRedirects = options.maxRedirects ?? 5;
+  const maxBytes = options.maxBytes ?? MAX_HTML_BYTES;
   let current = rawUrl;
   for (let hop = 0; hop <= maxRedirects; hop++) {
     await assertSafeUrl(current);
@@ -160,17 +175,23 @@ export async function fetchHtmlSafe(
       headers: {
         "User-Agent":
           options.userAgent ??
-          "Mozilla/5.0 (compatible; DormScopeBot/1.2; +https://dormscope-six.vercel.app; research)",
-        Accept: "text/html,application/xhtml+xml",
+          "Mozilla/5.0 (compatible; DormScopeBot/1.3; +https://dormscope-six.vercel.app; research)",
+        Accept: "text/html,application/xhtml+xml,application/pdf",
       },
       redirect: "manual",
       signal: AbortSignal.timeout(options.timeoutMs ?? 25000),
     });
 
+    const headerMap: Record<string, string> = {};
+    res.headers.forEach((v, k) => {
+      headerMap[k.toLowerCase()] = v;
+    });
+    const retryAfterMs = parseRetryAfter(res.headers.get("retry-after"));
+
     if ([301, 302, 303, 307, 308].includes(res.status)) {
       const loc = res.headers.get("location");
       if (!loc) {
-        return { html: null, finalUrl: current, status: res.status };
+        return { html: null, finalUrl: current, status: res.status, headers: headerMap, retryAfterMs };
       }
       const next = new URL(loc, current).toString();
       await assertSafeUrl(next);
@@ -179,16 +200,39 @@ export async function fetchHtmlSafe(
     }
 
     if (!res.ok) {
-      return { html: null, finalUrl: current, status: res.status };
+      return {
+        html: null,
+        finalUrl: current,
+        status: res.status,
+        headers: headerMap,
+        retryAfterMs,
+      };
     }
     const ct = res.headers.get("content-type") ?? "";
-    if (ct && !/html|text|xml/i.test(ct)) {
-      return { html: null, finalUrl: res.url || current, status: res.status };
+    if (ct && !/html|text|xml|json|pdf/i.test(ct)) {
+      return { html: null, finalUrl: res.url || current, status: res.status, headers: headerMap };
     }
-    const html = await res.text();
+
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (buf.byteLength > maxBytes) {
+      return {
+        html: null,
+        finalUrl: res.url || current,
+        status: res.status,
+        headers: headerMap,
+      };
+    }
+    const html = buf.toString("utf8");
     const { createHash } = await import("crypto");
     const contentHash = createHash("sha256").update(html).digest("hex").slice(0, 32);
-    return { html, finalUrl: res.url || current, status: res.status, contentHash };
+    return {
+      html,
+      finalUrl: res.url || current,
+      status: res.status,
+      contentHash,
+      headers: headerMap,
+      retryAfterMs,
+    };
   }
   throw new SafeUrlError("Too many redirects");
 }

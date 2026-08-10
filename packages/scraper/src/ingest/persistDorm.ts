@@ -51,15 +51,21 @@ const PHYSICAL_KINDS = new Set<HousingEntityKind>([
   HousingEntityKind.RESIDENCE,
 ]);
 
-function inferHousingFlags(entityKind: HousingEntityKind, _parentNameHint?: string) {
+function inferHousingFlags(entityKind: HousingEntityKind, parentNameHint?: string) {
   let isAssignableHousingOption: boolean;
   if (ASSIGNABLE_KINDS.has(entityKind)) {
     isAssignableHousingOption = true;
   } else if (ORGANIZATIONAL_KINDS.has(entityKind)) {
-    // Organizational containers (complexes, villages) are not directly assignable.
-    isAssignableHousingOption = false;
+    // Organizational containers — not directly assignable unless Unit (students choose Unit)
+    isAssignableHousingOption = entityKind === HousingEntityKind.UNIT;
   } else {
-    isAssignableHousingOption = entityKind === HousingEntityKind.UNKNOWN || entityKind === HousingEntityKind.OTHER;
+    // UNKNOWN/OTHER: not automatically rankable — requires detail/assignment evidence
+    isAssignableHousingOption = false;
+  }
+
+  // If we have a parent hint, this is likely a child building → assignable when physical
+  if (parentNameHint && PHYSICAL_KINDS.has(entityKind)) {
+    isAssignableHousingOption = true;
   }
 
   const isPhysicalBuilding =
@@ -72,9 +78,19 @@ function inferHousingFlags(entityKind: HousingEntityKind, _parentNameHint?: stri
   };
 }
 
+function resolveTriState(
+  amenities: string[],
+  positive: string,
+  negative: string
+): boolean | undefined {
+  if (amenities.includes(positive)) return true;
+  if (amenities.includes(negative)) return false;
+  return undefined;
+}
+
 function resolveHasAC(ex: ExtractedDorm): boolean | undefined {
-  if (ex.amenities.includes("ac")) return true;
-  if (ex.amenities.includes("no_ac")) return false;
+  const fromAmenities = resolveTriState(ex.amenities, "ac", "no_ac");
+  if (fromAmenities !== undefined) return fromAmenities;
   const fromDescription = ex.description ? normalizeAC(ex.description) : null;
   if (fromDescription === true) return true;
   if (fromDescription === false) return false;
@@ -131,11 +147,18 @@ export async function persistExtractedDorm(
   }
 
   const hasAC = resolveHasAC(ex);
-  const laundryAccess = ex.amenities.includes("laundry") ? true : undefined;
-  const kitchenAccess = ex.amenities.includes("kitchen") ? true : undefined;
+  const laundryAccess = resolveTriState(ex.amenities, "laundry", "no_laundry");
+  const kitchenAccess = resolveTriState(ex.amenities, "kitchen", "no_kitchen");
+  const elevatorAccess = resolveTriState(ex.amenities, "elevator", "no_elevator");
   const studyLounges = ex.amenities.includes("study_lounge") ? true : undefined;
 
   const yearlyCost = pickYearlyCost(ex.costs);
+
+  const classificationConfidence = ex.classification?.confidence ?? 0.6;
+  // Activation threshold: low-confidence candidates stay REVIEW, not ACTIVE public inventory
+  const activate =
+    classificationConfidence >= 0.55 &&
+    (opts.isOfficial || classificationConfidence >= 0.7);
 
   const confidence = sourceConfidence(
     opts.isOfficial ? SourceType.OFFICIAL_WEBSITE : SourceType.OTHER
@@ -149,6 +172,22 @@ export async function persistExtractedDorm(
   const entityKind = KIND_MAP[ex.entityKindHint ?? ""] ?? HousingEntityKind.UNKNOWN;
   const housingFlags = inferHousingFlags(entityKind, ex.parentNameHint);
 
+  // Soft preference: strong name + official directory → assignable even if kind UNKNOWN
+  let isAssignable = housingFlags.isAssignableHousingOption;
+  let rankingGranularity = housingFlags.rankingGranularity;
+  if (
+    !isAssignable &&
+    entityKind === HousingEntityKind.UNKNOWN &&
+    classificationConfidence >= 0.7 &&
+    opts.isOfficial &&
+    (ex.classification?.reasons ?? []).some((r) =>
+      /strong_housing_name|repeated_directory|structural_card/i.test(r)
+    )
+  ) {
+    isAssignable = true;
+    rankingGranularity = true;
+  }
+
   const baseData = {
     name,
     collegeId: opts.collegeId,
@@ -158,18 +197,40 @@ export async function persistExtractedDorm(
     isVerified: false as const,
     lastUpdatedAt: new Date(),
     entityKind,
-    isAssignableHousingOption: housingFlags.isAssignableHousingOption,
+    isAssignableHousingOption: isAssignable,
     isPhysicalBuilding: housingFlags.isPhysicalBuilding,
-    rankingGranularity: housingFlags.rankingGranularity,
+    rankingGranularity,
+    isActive: activate,
+    dataQualityStatus: activate ? ("ACTIVE" as const) : ("REVIEW" as const),
+    officialCategoryLabel: ex.officialCategoryLabel ?? undefined,
     // Eligibility stays unknown unless explicitly extracted (never default true)
     ...(ex.imageUrl ? { imageUrl: ex.imageUrl } : {}),
     ...(yearlyCost != null ? { yearlyCost } : {}),
     ...(ex.description ? { description: ex.description } : {}),
     ...(hasAC === true ? { hasAC: true } : hasAC === false ? { hasAC: false } : {}),
-    ...(laundryAccess ? { laundryAccess } : {}),
-    ...(kitchenAccess ? { kitchenAccess } : {}),
+    ...(laundryAccess === true
+      ? { laundryAccess: true }
+      : laundryAccess === false
+        ? { laundryAccess: false }
+        : {}),
+    ...(kitchenAccess === true
+      ? { kitchenAccess: true }
+      : kitchenAccess === false
+        ? { kitchenAccess: false }
+        : {}),
+    ...(elevatorAccess === true
+      ? { elevatorAccess: true }
+      : elevatorAccess === false
+        ? { elevatorAccess: false }
+        : {}),
     ...(studyLounges ? { studyLounges } : {}),
   };
+
+  if (!activate && !existing) {
+    // Still record extraction decision path via caller; skip creating low-confidence dorms
+    // unless we already have the entity (then update carefully)
+    return null;
+  }
 
   const dorm = existing
     ? await prisma.dorm.update({
@@ -188,10 +249,27 @@ export async function persistExtractedDorm(
           hasAC: hasAC ?? null,
           laundryAccess: laundryAccess ?? null,
           kitchenAccess: kitchenAccess ?? null,
+          elevatorAccess: elevatorAccess ?? null,
           studyLounges: studyLounges ?? null,
           yearlyCost: yearlyCost ?? null,
         },
       });
+
+  // Resolve parent from hint when possible
+  if (ex.parentNameHint && !dorm.parentHousingId) {
+    const parent = candidates.find(
+      (c) =>
+        c.id !== dorm.id &&
+        (safeSameEntity(c.name, ex.parentNameHint!) ||
+          c.name.toLowerCase() === ex.parentNameHint!.toLowerCase())
+    );
+    if (parent) {
+      await prisma.dorm.update({
+        where: { id: dorm.id },
+        data: { parentHousingId: parent.id },
+      });
+    }
+  }
 
   // Link source without overwriting Source.dormId for multi-entity directories
   await prisma.dormSource.upsert({
@@ -264,8 +342,18 @@ export async function persistExtractedDorm(
     { fieldName: "officialHousingUrl", value: ex.detailUrl ?? opts.sourceUrl },
     { fieldName: "yearlyCost", value: yearlyCost != null ? String(yearlyCost) : null },
     { fieldName: "hasAC", value: hasAC === true ? "true" : hasAC === false ? "false" : null },
-    { fieldName: "laundryAccess", value: laundryAccess ? "true" : null },
-    { fieldName: "kitchenAccess", value: kitchenAccess ? "true" : null },
+    {
+      fieldName: "laundryAccess",
+      value: laundryAccess === true ? "true" : laundryAccess === false ? "false" : null,
+    },
+    {
+      fieldName: "kitchenAccess",
+      value: kitchenAccess === true ? "true" : kitchenAccess === false ? "false" : null,
+    },
+    {
+      fieldName: "elevatorAccess",
+      value: elevatorAccess === true ? "true" : elevatorAccess === false ? "false" : null,
+    },
     { fieldName: "studyLounges", value: studyLounges ? "true" : null },
     { fieldName: "imageUrl", value: ex.imageUrl ?? null },
     { fieldName: "entityKind", value: entityKind },
@@ -273,6 +361,38 @@ export async function persistExtractedDorm(
 
   for (const f of fields) {
     if (f.value == null) continue;
+
+    // Conflict detection: different value from another source for same field
+    const conflicting = await prisma.fieldProvenance.findFirst({
+      where: {
+        dormId: dorm.id,
+        fieldName: f.fieldName,
+        NOT: { valueSnapshot: f.value },
+        sourceId: { not: opts.sourceId },
+      },
+      orderBy: { createdAt: "desc" },
+    });
+    if (conflicting) {
+      const existingConflict = await prisma.fieldConflict.findFirst({
+        where: { dormId: dorm.id, fieldName: f.fieldName, status: "OPEN" },
+      });
+      if (!existingConflict) {
+        await prisma.fieldConflict.create({
+          data: {
+            dormId: dorm.id,
+            fieldName: f.fieldName,
+            status: "OPEN",
+            values: {
+              previous: conflicting.valueSnapshot,
+              previousSourceId: conflicting.sourceId,
+              incoming: f.value,
+              incomingSourceId: opts.sourceId,
+            },
+          },
+        });
+      }
+    }
+
     const recent = await prisma.fieldProvenance.findFirst({
       where: {
         dormId: dorm.id,

@@ -26,6 +26,7 @@ export default async function CollegePage({ params }: { params: { slug: string }
   if (!data) notFound();
 
   const { highlights, dorms } = data;
+  const parentHousing = (data as { parentHousing?: typeof dorms }).parentHousing ?? [];
   const rankings: { label: string; name: string }[] = [];
   if (highlights.cheapest?.name) rankings.push({ label: "Most affordable (listed)", name: highlights.cheapest.name });
   if (highlights.bestFreshman?.name) rankings.push({ label: "Strong freshman fit", name: highlights.bestFreshman.name });
@@ -141,6 +142,45 @@ export default async function CollegePage({ params }: { params: { slug: string }
           </div>
         )}
       </section>
+
+      {parentHousing.length > 0 && (
+        <section>
+          <h2 className="font-display text-2xl tracking-tight">Residential communities</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Organizational housing groups and the buildings within them.
+          </p>
+          <div className="mt-6 space-y-8">
+            {parentHousing.map((parent) => (
+              <div key={parent.id}>
+                <h3 className="font-medium text-lg">
+                  <Link
+                    href={`/colleges/${data.slug}/dorms/${parent.slug}`}
+                    className="hover:underline underline-offset-4"
+                  >
+                    {parent.name}
+                  </Link>
+                </h3>
+                {"childHousing" in parent && Array.isArray((parent as { childHousing?: unknown[] }).childHousing) && (
+                  <ul className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                    {((parent as { childHousing: Array<{ id: string; name: string; slug: string }> }).childHousing).map(
+                      (child) => (
+                        <li key={child.id}>
+                          <Link
+                            href={`/colleges/${data.slug}/dorms/${child.slug}`}
+                            className="text-sm text-primary underline-offset-4 hover:underline"
+                          >
+                            {child.name}
+                          </Link>
+                        </li>
+                      )
+                    )}
+                  </ul>
+                )}
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
     </div>
   );
 }

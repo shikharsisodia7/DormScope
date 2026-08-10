@@ -31,7 +31,15 @@ export async function findJunkCandidates(prisma: PrismaClient): Promise<JunkCand
 
     // Soften: if entity has user data, only quarantine the strongest junk reasons
     const hasUserData = d.reviews.length > 0 || d.favorites.length > 0;
-    if (hasUserData && !["nav_or_policy_label", "procedural_title", "cta_phrase"].includes(assessment.reason)) {
+    const strongReasons = [
+      "nav_or_policy_label",
+      "procedural_title",
+      "cta_phrase",
+      "generic_category_label",
+      "room_type_listing",
+      "campus_section_label",
+    ];
+    if (hasUserData && !strongReasons.includes(assessment.reason)) {
       continue;
     }
 

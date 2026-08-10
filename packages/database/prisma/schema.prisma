@@ -870,6 +870,37 @@ model MatchResult {
   @@index([matchRunId, rank])
 }
 
+// ─── Admin Audit Log ─────────────────────────────────────────────────────────
+
+model AdminAuditLog {
+  id          String   @id @default(cuid())
+  actorId     String?
+  actorEmail  String?
+  action      String
+  entityType  String
+  entityId    String?
+  before      Json?
+  after       Json?
+  note        String?
+  createdAt   DateTime @default(now())
+
+  @@index([entityType, entityId])
+  @@index([createdAt])
+}
+
+// ─── Rate Limit Buckets (durable, cross-instance) ────────────────────────────
+
+model RateLimitBucket {
+  id          String   @id @default(cuid())
+  keyHash     String   @unique
+  windowStart DateTime
+  count       Int      @default(0)
+  updatedAt   DateTime @updatedAt
+
+  @@index([keyHash])
+  @@index([windowStart])
+}
+
 // ─── Data Quality ────────────────────────────────────────────────────────────
 
 model DataQualityReport {

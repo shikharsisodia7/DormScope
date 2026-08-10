@@ -36,8 +36,35 @@ export async function isAdminUser(): Promise<boolean> {
   }
 }
 
-/** Redirect non-admins away from admin UI. */
+/**
+ * Guard admin Server Components.
+ * Unauthenticated users are redirected home.
+ * If Clerk is configured but ADMIN_USER_IDS / ADMIN_EMAILS are both empty,
+ * authenticated non-empty sessions get an explicit configuration error
+ * (do not silently bounce every would-be admin).
+ */
 export async function requireAdminSession(): Promise<void> {
+  const { userIds, emails } = getAdminAllowlist();
+  const clerkConfigured = Boolean(process.env.CLERK_SECRET_KEY);
+
+  let userId: string | null = null;
+  try {
+    const session = await auth();
+    userId = session.userId ?? null;
+  } catch {
+    userId = null;
+  }
+
+  if (!userId) {
+    redirect("/");
+  }
+
+  if (clerkConfigured && userIds.length === 0 && emails.length === 0) {
+    throw new Error(
+      "Admin authentication misconfigured: CLERK_SECRET_KEY is set but ADMIN_USER_IDS and ADMIN_EMAILS are both empty. Set at least one allowlist entry (never commit secrets)."
+    );
+  }
+
   const ok = await isAdminUser();
   if (!ok) redirect("/");
 }

@@ -4,7 +4,6 @@ import {
   SourceType,
   HousingCoverageStatus,
 } from "@dormscope/database";
-import { chromium } from "playwright";
 import { parseHousingHtmlDetailed, parsePageMetadata } from "../html/parsePage.js";
 import {
   extractDomain,
@@ -16,16 +15,19 @@ import { assertSafeUrl, SafeUrlError, fetchHtmlSafe } from "../security/ssrf.js"
 import { persistExtractedDorm, upsertPageSource } from "../ingest/persistDorm.js";
 import { decideHousingCoverage } from "./coverageDecision.js";
 import { DomainRateLimiter } from "../net/domainRateLimiter.js";
+import { fetchHtmlWithPooledBrowser, closeSharedBrowser } from "../browser/pool.js";
+import { extractDetailFacts } from "../enrich/detailFacts.js";
+import { enrichCollegeHierarchy } from "../enrich/hierarchy.js";
 
 const UA =
   process.env.SCRAPER_USER_AGENT ??
-  "Mozilla/5.0 (compatible; DormScopeBot/1.2; +https://dormscope-six.vercel.app; research)";
+  "Mozilla/5.0 (compatible; DormScopeBot/1.3; +https://dormscope-six.vercel.app; research)";
 
 const ENABLE_PLAYWRIGHT = process.env.SCRAPER_ENABLE_PLAYWRIGHT === "1";
 const MAX_PAGES = Number(process.env.SCRAPER_MAX_PAGES ?? 18);
 const FETCH_DELAY_MS = Number(process.env.SCRAPER_RATE_LIMIT_MS ?? 350);
-const EXTRACTOR_VERSION = "parseHousingHtmlDetailed@3";
-const MODE = process.env.SCRAPE_MODE ?? "full"; // discovery | full | validate
+const EXTRACTOR_VERSION = "parseHousingHtmlDetailed@4";
+const MODE = process.env.SCRAPE_MODE ?? "full"; // discovery | full | validate | enrich | hierarchy
 
 const domainLimiter = new DomainRateLimiter({
   minSpacingMs: Number(process.env.SCRAPER_DOMAIN_SPACING_MS ?? 800),
@@ -47,30 +49,7 @@ function hostOf(url: string): string {
 async function fetchHtmlWithPlaywright(
   url: string
 ): Promise<{ html: string | null; finalUrl: string; status: number }> {
-  await assertSafeUrl(url);
-  const browser = await chromium.launch({ headless: true });
-  try {
-    const page = await browser.newPage();
-    await page.setExtraHTTPHeaders({ "User-Agent": UA });
-    page.on("framenavigated", async (frame) => {
-      if (frame === page.mainFrame()) {
-        try {
-          await assertSafeUrl(frame.url());
-        } catch {
-          await page.close().catch(() => undefined);
-        }
-      }
-    });
-    const res = await page.goto(url, { waitUntil: "domcontentloaded", timeout: 35000 });
-    await page
-      .waitForSelector("a, h1, h2, h3, .card, article", { timeout: 8000 })
-      .catch(() => undefined);
-    await sleep(Math.min(FETCH_DELAY_MS, 1200));
-    const html = await page.content();
-    return { html, finalUrl: page.url(), status: res?.status() ?? 0 };
-  } finally {
-    await browser.close();
-  }
+  return fetchHtmlWithPooledBrowser(url);
 }
 
 type FrontierItem = { url: string; priority: number; depth: number };
@@ -262,6 +241,8 @@ export async function runScraperForCollege(
   let unchangedPagesSkipped = 0;
   let bestHousingUrl: string | null = college.housingUrl;
   let blocked = false;
+  let accessRestrictedHits = 0;
+  let successfulFetches = 0;
   let lastHttpStatus: number | undefined;
   let housingSiteFound = Boolean(college.housingUrl);
   let directoryParsed = false;
@@ -307,17 +288,17 @@ export async function runScraperForCollege(
         }
         lastHttpStatus = fetched.status;
 
-        // Access restrictions: mark blocked — do NOT use Playwright to bypass
+        // Access restrictions on a single URL: do not Playwright-bypass; do not whole-college block yet
         if (fetched.status === 403 || fetched.status === 401) {
-          blocked = true;
-          await log("warn", `Access restricted HTTP ${fetched.status}`, item.url);
+          accessRestrictedHits += 1;
+          await log("warn", `Access restricted HTTP ${fetched.status} (source-scoped)`, item.url);
           domainLimiter.backoff(hostOf(item.url), 60_000);
           continue;
         }
         if (fetched.status === 429) {
-          const retryAfter = 30_000;
+          const retryAfter = fetched.retryAfterMs ?? 30_000;
           domainLimiter.backoff(hostOf(item.url), retryAfter);
-          await log("warn", `Rate limited HTTP 429 — cooldown`, item.url);
+          await log("warn", `Rate limited HTTP 429 — cooldown ${retryAfter}ms`, item.url);
           continue;
         }
         if (fetched.status >= 500) {
@@ -340,6 +321,7 @@ export async function runScraperForCollege(
           await log("warn", `No HTML retrieved (${fetched.status})`, item.url);
           continue;
         }
+        successfulFetches += 1;
 
         // Content-hash skip for known unchanged sources
         if (!forceRefresh && fetched.contentHash) {
@@ -441,12 +423,23 @@ export async function runScraperForCollege(
           bestHousingUrl = fetched.finalUrl;
         }
 
+        const pageTitle =
+          meta.title?.trim() ||
+          `${college.name} — ${parsed.pageRoles[0] ?? "housing"}`;
+        const roleLabel = parsed.pageRoles.includes("housing_directory")
+          ? "directory"
+          : parsed.pageRoles.includes("housing_detail")
+            ? "detail"
+            : parsed.pageRoles.includes("rates")
+              ? "rates"
+              : parsed.pageRoles[0] ?? "housing";
+
         const official = domain ? isOfficialDomain(fetched.finalUrl, domain) : isAllowedUrl(fetched.finalUrl);
         const source = await upsertPageSource({
           collegeId: college.id,
           url: item.url,
           finalUrl: fetched.finalUrl,
-          title: `${college.name} housing page`,
+          title: pageTitle.slice(0, 200),
           sourceType: official ? SourceType.OFFICIAL_WEBSITE : SourceType.OTHER,
           confidence: sourceConfidence(SourceType.OFFICIAL_WEBSITE),
           isApproved: official,
@@ -454,7 +447,7 @@ export async function runScraperForCollege(
           contentHash: fetched.contentHash,
           httpStatus: fetched.status,
           extractorVersion: EXTRACTOR_VERSION,
-          pageRole: parsed.pageRoles.join(","),
+          pageRole: roleLabel,
         });
 
         for (const rej of parsed.rejected.slice(0, 30)) {
@@ -483,6 +476,33 @@ export async function runScraperForCollege(
         acceptedCandidates += parsed.accepted.length;
 
         for (const ex of parsed.accepted) {
+          // Detail enrichment: merge page-level facts into candidate when on detail page
+          if (isDetail && html) {
+            const facts = extractDetailFacts(html, fetched.finalUrl);
+            if (facts.hasAC != null) {
+              if (facts.hasAC) ex.amenities = [...new Set([...ex.amenities, "ac"])];
+              else ex.amenities = [...new Set([...ex.amenities.filter((a) => a !== "ac"), "no_ac"])];
+            }
+            if (facts.elevatorAccess === false) ex.amenities = [...new Set([...ex.amenities, "no_elevator"])];
+            if (facts.elevatorAccess === true) ex.amenities = [...new Set([...ex.amenities, "elevator"])];
+            if (facts.kitchenAccess === false) ex.amenities = [...new Set([...ex.amenities, "no_kitchen"])];
+            if (facts.kitchenAccess === true) ex.amenities = [...new Set([...ex.amenities, "kitchen"])];
+            if (facts.laundryAccess === false) ex.amenities = [...new Set([...ex.amenities, "no_laundry"])];
+            if (facts.laundryAccess === true) ex.amenities = [...new Set([...ex.amenities, "laundry"])];
+            if (facts.yearlyCost != null) {
+              ex.costs.push({
+                label: "Housing cost",
+                amount: facts.yearlyCost,
+                period: "yearly",
+                uncertain: false,
+              });
+            }
+            if (facts.imageUrl && !ex.imageUrl) ex.imageUrl = facts.imageUrl;
+            if (facts.amenities.includes("study_lounge")) {
+              ex.amenities = [...new Set([...ex.amenities, "study_lounge"])];
+            }
+          }
+
           const result = await persistExtractedDorm(ex, {
             collegeId: college.id,
             sourceUrl: fetched.finalUrl,
@@ -527,6 +547,11 @@ export async function runScraperForCollege(
     }
 
     hitPageBudget = pagesVisited >= MAX_PAGES && frontier.length > 0;
+    // Whole-college BLOCKED only when meaningful discovery was prevented across viable sources
+    blocked =
+      successfulFetches === 0 &&
+      accessRestrictedHits > 0 &&
+      uniqueEntityIds.size === 0;
     const unresolvedHousingLinks = frontier.filter((f) => scoreUrl(f.url, bestHousingUrl) >= 40).length;
 
     const uniqueEntitiesSeenThisRun = uniqueEntityIds.size;
@@ -554,6 +579,16 @@ export async function runScraperForCollege(
 
     const inventorySuccess = uniqueEntitiesSeenThisRun > 0;
     const discoverySuccess = housingSiteFound || officialDirectorySourcesFound > 0;
+
+    // Hierarchy enrichment after inventory extract
+    if (inventorySuccess && scrapeMode !== "discovery") {
+      try {
+        const hier = await enrichCollegeHierarchy(college.id, { applyMedium: true });
+        await log("info", `Hierarchy linked=${hier.linked} suggested=${hier.suggested}`);
+      } catch (err) {
+        await log("warn", `Hierarchy enrichment failed: ${(err as Error).message}`);
+      }
+    }
 
     await prisma.college.update({
       where: { id: college.id },
@@ -679,5 +714,7 @@ export async function runScraperForCollege(
     });
     await log("error", (err as Error).message);
     throw err;
+  } finally {
+    await closeSharedBrowser().catch(() => undefined);
   }
 }

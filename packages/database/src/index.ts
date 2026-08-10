@@ -23,3 +23,6 @@ export {
   type ImportInstitutionsOptions,
   type ImportInstitutionsResult,
 } from "./importInstitutions";
+
+// Integration helpers live in ./integration/* and are imported directly by
+// tests/scripts — do not re-export here (breaks Next.js package resolution).

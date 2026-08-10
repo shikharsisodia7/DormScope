@@ -30,11 +30,16 @@
     "scraper:ingest-sample": "npm run ingest:sample --workspace=@dormscope/scraper",
     "scraper:nationwide": "npm run ingest:nationwide --workspace=@dormscope/scraper",
     "scraper:worker": "npm run worker --workspace=@dormscope/scraper",
+    "scraper:hierarchy": "npm run hierarchy:enrich --workspace=@dormscope/scraper",
     "db:backfill-eligibility": "tsx packages/database/scripts/backfill-unknown-eligibility.ts",
     "test": "npm run test --workspace=@dormscope/scoring && npm run test --workspace=@dormscope/scraper && npm run test --workspace=@dormscope/web",
+    "test:integration": "npm run test:integration --workspace=@dormscope/database",
+    "test:e2e": "npm run test:e2e --workspace=@dormscope/web",
+    "test:e2e:ui": "npm run test:e2e:ui --workspace=@dormscope/web",
+    "db:seed-e2e": "npm run seed:e2e --workspace=@dormscope/web",
     "typecheck": "npm run typecheck --workspace=@dormscope/shared && npm run typecheck --workspace=@dormscope/scoring && npm run typecheck --workspace=@dormscope/scraper && npm run typecheck --workspace=@dormscope/database && npm run typecheck --workspace=@dormscope/web && npm run typecheck --workspace=@dormscope/api",
     "check": "npm run typecheck && npm test && npm run lint",
-    "release:check": "npm run typecheck && npm test && npm run lint && npm run build",
+    "release:check": "npm run typecheck && npm test && npm run test:integration && npm run lint && npm run build && npm run test:e2e",
     "lint": "turbo run lint"
   },
   "devDependencies": {

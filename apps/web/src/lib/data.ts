@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { buildCollegeHighlights } from "@/lib/college-helpers";
 import { DataQualityStatus } from "@dormscope/database";
+import { canonicalUrl, resolvedUrl, compareSourceRoles } from "@dormscope/shared";
 
 /** Direct DB loaders for Server Components — never HTTP self-fetch on Vercel. */
 
@@ -16,29 +17,70 @@ function isQuarantineExcluded() {
 type SourceLike = {
   id: string;
   url: string;
+  finalUrl?: string | null;
+  canonicalUrl?: string | null;
   title: string | null;
   sourceType: string;
   isApproved: boolean;
+  pageRole?: string | null;
   createdAt?: Date;
 };
 
-function mergeSources(
+type DormSourceLike = {
+  source: SourceLike;
+  role?: string | null;
+};
+
+/** Canonical merge key: prefer canonicalUrl/finalUrl, then normalize the raw url. */
+function mergeKey(s: SourceLike): string {
+  const preferred = s.canonicalUrl ?? s.finalUrl ?? s.url;
+  try {
+    return canonicalUrl(preferred) || s.url;
+  } catch {
+    return s.url;
+  }
+}
+
+/**
+ * Merge legacy dorm.sources with dorm.dormSources.
+ *  - Deduplicates by canonical URL.
+ *  - Prefers entries with a non-null title and a specific pageRole.
+ *  - Orders: detail → directory → rates → eligibility → other.
+ */
+export function mergeSources(
   legacy: SourceLike[],
-  fromDormSources: Array<{ source: SourceLike; role?: string | null }>
+  fromDormSources: DormSourceLike[]
 ): SourceLike[] {
-  const byUrl = new Map<string, SourceLike>();
-  for (const s of legacy) {
-    byUrl.set(s.url, s);
-  }
-  for (const ds of fromDormSources) {
-    const s = ds.source;
-    if (!byUrl.has(s.url)) {
-      byUrl.set(s.url, s);
+  const byKey = new Map<string, SourceLike & { _role?: string | null }>();
+
+  const upsert = (s: SourceLike, role?: string | null) => {
+    const key = mergeKey(s);
+    const existing = byKey.get(key);
+    if (!existing) {
+      byKey.set(key, { ...s, _role: role ?? s.pageRole });
+    } else {
+      // Prefer entry with a real title
+      if (!existing.title && s.title) {
+        byKey.set(key, { ...s, _role: role ?? s.pageRole ?? existing._role });
+      } else if (!existing._role && (role ?? s.pageRole)) {
+        byKey.set(key, { ...existing, _role: role ?? s.pageRole });
+      }
     }
-  }
-  return Array.from(byUrl.values()).sort(
-    (a, b) => (b.createdAt?.getTime() ?? 0) - (a.createdAt?.getTime() ?? 0)
-  );
+  };
+
+  for (const s of legacy) upsert(s, null);
+  for (const ds of fromDormSources) upsert(ds.source, ds.role);
+
+  return Array.from(byKey.values()).sort((a, b) => {
+    const roleDiff = compareSourceRoles(a._role ?? a.pageRole, b._role ?? b.pageRole);
+    if (roleDiff !== 0) return roleDiff;
+    // Fallback: newest first
+    return (b.createdAt?.getTime() ?? 0) - (a.createdAt?.getTime() ?? 0);
+  }).map(({ _role: _, ...rest }) => {
+    // Normalize display URL to finalUrl when available
+    const displayUrl = resolvedUrl(rest.url, rest.finalUrl, rest.canonicalUrl);
+    return { ...rest, url: displayUrl };
+  });
 }
 
 export async function getCollegeBySlug(slug: string) {
@@ -97,16 +139,33 @@ export async function getDormBySlugs(collegeSlug: string, dormSlug: string) {
       roomTypes: true,
       dormAmenities: { include: { amenity: true } },
       housingCosts: true,
-      sources: { where: { isApproved: true }, orderBy: { createdAt: "desc" } },
+      sources: {
+        where: { isApproved: true },
+        orderBy: { createdAt: "desc" },
+        select: {
+          id: true,
+          url: true,
+          finalUrl: true,
+          canonicalUrl: true,
+          title: true,
+          sourceType: true,
+          isApproved: true,
+          pageRole: true,
+          createdAt: true,
+        },
+      },
       dormSources: {
         include: {
           source: {
             select: {
               id: true,
               url: true,
+              finalUrl: true,
+              canonicalUrl: true,
               title: true,
               sourceType: true,
               isApproved: true,
+              pageRole: true,
               createdAt: true,
             },
           },

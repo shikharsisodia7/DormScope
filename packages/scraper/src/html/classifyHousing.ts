@@ -45,11 +45,15 @@ export interface ClassificationResult {
 }
 
 const NEGATIVE_EXACT =
-  /^(residence halls?|residence life|residential life|housing|housing options|explore housing|apply( now)?|learn more|see this residence|view all|dining|meal plans?|move[- ]?in|move[- ]?out|living on campus|our residences|campus housing|student housing|undergraduate housing|graduate housing|family housing|theme programs?|specialized communities|living sustainably|home|menu|skip to|search|contact( us)?|about|staff|directory of staff|faq|faqs|rates?|room types?|floor plans?|virtual tour|map|parking|laundry facilities|how to apply|eligibility|important dates|news|events|policies|tours|health|safety|my room|compare housing options|housing guarantee|dates? (&|and) deadlines|bridge program|edge programs|housing task force|spring housing|off-campus housing|housing by user type|cancellations? (&|and) appeals|terms?,? conditions,? (&|and) agreements|transit and transportation|front desks? (&|and) housing facilities|mail service|cleaning (&|and) maintenance|technology (&|and)? ?services|winter break closure|living with a roommate|on-campus housing benefits|temporary quad room|optional apartment cleaning service|bed bugs.*|missing student policy.*|graduate housing assignment.*|family housing.*|how to .*|newly admitted.*|visiting scholar.*|summer .*housing.*|housing relocation.*|housing application)$/i;
+  /^(residence halls?|residence life|residential life|housing|housing options|explore housing|apply( now)?|learn more|see this residence|view all|dining|meal plans?|move[- ]?in|move[- ]?out|living on campus|our residences|campus housing|student housing|undergraduate housing|graduate housing|family housing|theme programs?|theme houses|greek houses|cooperative houses|self-operated houses|row houses|specialized communities|living sustainably|home|menu|skip to|search|contact( us)?|about|staff|directory of staff|faq|faqs|rates?|room types?|floor plans?|virtual tour|map|parking|laundry facilities|how to apply|eligibility|important dates|news|events|policies|tours|health|safety|my room|compare housing options|housing guarantee|dates? (&|and) deadlines|bridge program|edge programs|housing task force|spring housing|off-campus housing|housing by user type|cancellations? (&|and) appeals|terms?,? conditions,? (&|and) agreements|transit and transportation|front desks? (&|and) housing facilities|mail service|cleaning (&|and) maintenance|technology (&|and)? ?services|winter break closure|living with a roommate|on-campus housing benefits|temporary quad room|optional apartment cleaning service|bed bugs.*|missing student policy.*|graduate housing assignment.*|family housing.*|how to .*|newly admitted.*|visiting scholar.*|summer .*housing.*|housing relocation.*|housing application|amenities|residence|high-rise|low-rise|apartment features|apartment layouts|apartments and suites|apartments & suites|single graduate housing|single undergraduate housing|on-campus housing options.*|on-campus housing amenities|stanford (on-campus )?housing amenities|residences for couples without children|residences for single graduates|residences for students with children)$/i;
 
 /** Hard reject when these appear in the candidate NAME itself. */
 const NEGATIVE_NAME =
-  /\b(dining hall|town hall|lecture hall|great hall|city hall|music hall|concert hall|residence life staff|housing staff|housing application|housing portal|meal plan|dining commons|food court|career center|student union|recreation center|fitness center|library|registrar|bursar|admissions office)\b/i;
+  /\b(dining hall|town hall|lecture hall|great hall|city hall|music hall|concert hall|residence life staff|housing staff|housing application|housing portal|meal plan|dining commons|food court|career center|student union|recreation center|fitness center|library|registrar|bursar|admissions office|projected rates|contract rates|cost of attendance|additional fees|equipment fee|furniture rental|housing amenities|application process|front desk)\b/i;
+
+/** Marketing / about / room-type inventory lines — never residence entities. */
+const NEGATIVE_NAME_PREFIX =
+  /^(about the|be excited|be a big|furnished single-occupancy|unfurnished single-occupancy|academic year \d{4})/i;
 
 /**
  * Soft negatives in surrounding description only — weighted penalty, not absolute reject.
@@ -221,7 +225,7 @@ export function classifyHousingCandidate(
     };
   }
 
-  if (NEGATIVE_NAME.test(name)) {
+  if (NEGATIVE_NAME.test(name) || NEGATIVE_NAME_PREFIX.test(name)) {
     return {
       accepted: false,
       confidence: 0.9,

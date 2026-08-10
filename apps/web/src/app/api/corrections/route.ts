@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { jsonOk, jsonError, handleRouteError, rateLimit } from "@/lib/api";
+import { jsonOk, jsonError, handleRouteError } from "@/lib/api";
+import { durableRateLimit } from "@/lib/durable-rate-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -18,7 +19,7 @@ export async function POST(req: Request) {
       req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
       req.headers.get("x-real-ip") ||
       "unknown";
-    if (!rateLimit(`correction:${ip}`, 20, 60 * 60 * 1000)) {
+    if (!(await durableRateLimit(`correction:${ip}`, 20, 60 * 60 * 1000))) {
       return jsonError("Too many correction submissions. Try again later.", 429);
     }
 

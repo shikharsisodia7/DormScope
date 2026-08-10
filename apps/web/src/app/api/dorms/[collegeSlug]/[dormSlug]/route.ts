@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { jsonOk, jsonError, handleRouteError } from "@/lib/api";
+import { mergeSources } from "@/lib/data";
 
 export const dynamic = "force-dynamic";
 
@@ -19,7 +20,39 @@ export async function GET(
         roomTypes: true,
         dormAmenities: { include: { amenity: true } },
         housingCosts: true,
-        sources: { where: { isApproved: true }, orderBy: { createdAt: "desc" } },
+        sources: {
+          where: { isApproved: true },
+          orderBy: { createdAt: "desc" },
+          select: {
+            id: true,
+            url: true,
+            finalUrl: true,
+            canonicalUrl: true,
+            title: true,
+            sourceType: true,
+            isApproved: true,
+            pageRole: true,
+            createdAt: true,
+          },
+        },
+        dormSources: {
+          include: {
+            source: {
+              select: {
+                id: true,
+                url: true,
+                finalUrl: true,
+                canonicalUrl: true,
+                title: true,
+                sourceType: true,
+                isApproved: true,
+                pageRole: true,
+                createdAt: true,
+              },
+            },
+          },
+          orderBy: { createdAt: "desc" },
+        },
         reviewSummaries: true,
         reviews: {
           where: { status: "APPROVED" },
@@ -69,8 +102,10 @@ export async function GET(
       return acc;
     }, {});
 
+    const mergedSources = mergeSources(dorm.sources, dorm.dormSources);
+
     return jsonOk({
-      dorm,
+      dorm: { ...dorm, sources: mergedSources },
       collegeAvgCost: costAgg._avg.yearlyCost ?? 0,
       provenanceSummary: Object.values(provenanceSummary),
     });

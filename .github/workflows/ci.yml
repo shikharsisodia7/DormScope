@@ -9,10 +9,31 @@ on:
 jobs:
   ci:
     runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: dormscope_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
     env:
       DATABASE_URL: postgresql://ci:ci@localhost:5432/dormscope_ci?schema=public
+      DATABASE_URL_TEST: postgresql://ci:ci@localhost:5432/dormscope_ci?schema=public
       NEXT_PUBLIC_APP_URL: http://localhost:3000
       NEXT_PUBLIC_API_URL: ""
+      # Required to allow integration tests when DATABASE_URL_TEST == DATABASE_URL
+      # (CI uses a single test DB — not dangerous because it's ephemeral)
+      NODE_ENV: test
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -29,14 +50,64 @@ jobs:
       - name: Generate Prisma client
         run: npm run db:generate
 
-      - name: Lint
-        run: npm run lint
+      - name: Push schema to test DB
+        run: npm run push --workspace=@dormscope/database
+        env:
+          DATABASE_URL: ${{ env.DATABASE_URL_TEST }}
 
+      # ── Unit tests ────────────────────────────────────────────────────────
       - name: Typecheck
         run: npm run typecheck
 
-      - name: Unit tests (scoring + scraper)
+      - name: Lint
+        run: npm run lint
+
+      - name: Unit tests (scoring + scraper + web)
         run: npm test
 
-      - name: Build web
+      # ── Integration tests ─────────────────────────────────────────────────
+      - name: Seed integration fixtures
+        run: npm run test:integration --workspace=@dormscope/database
+        env:
+          DATABASE_URL_TEST: ${{ env.DATABASE_URL_TEST }}
+
+      # ── Build ─────────────────────────────────────────────────────────────
+      - name: Build web app
         run: npm run build --workspace=@dormscope/web
+        env:
+          DATABASE_URL: ${{ env.DATABASE_URL_TEST }}
+
+      # ── Playwright E2E ────────────────────────────────────────────────────
+      - name: Install Playwright browsers (chromium only)
+        run: npx playwright install chromium --with-deps
+        working-directory: apps/web
+
+      - name: Seed E2E fixtures
+        run: DATABASE_URL_TEST=${{ env.DATABASE_URL_TEST }} npm run db:seed-e2e
+        env:
+          DATABASE_URL_TEST: ${{ env.DATABASE_URL_TEST }}
+
+      - name: Run E2E tests
+        run: npm run test:e2e --workspace=@dormscope/web
+        env:
+          DATABASE_URL_TEST: ${{ env.DATABASE_URL_TEST }}
+          DATABASE_URL: ${{ env.DATABASE_URL_TEST }}
+          PLAYWRIGHT_FIXTURES: "1"
+          CI: "true"
+          NEXT_PUBLIC_APP_URL: http://localhost:3000
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: apps/web/playwright-report/
+          retention-days: 7
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: apps/web/test-results/
+          retention-days: 7

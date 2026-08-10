@@ -6,7 +6,8 @@
   "main": "./src/index.ts",
   "types": "./src/index.ts",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./integration": "./src/integration/index.ts"
   },
   "scripts": {
     "generate": "prisma generate",
@@ -16,6 +17,8 @@
     "studio": "prisma studio",
     "build": "prisma generate",
     "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "test:integration:watch": "vitest --config vitest.integration.config.ts",
     "import:institutions": "tsx scripts/import-institutions.ts",
     "seed:halls": "tsx scripts/seed-official-hall-directories.ts",
     "coverage": "tsx scripts/coverage-report.ts",
@@ -40,6 +43,7 @@
     "@types/adm-zip": "^0.5.7",
     "prisma": "^5.22.0",
     "tsx": "^4.19.2",
-    "typescript": "^5.6.3"
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.9"
   }
 }

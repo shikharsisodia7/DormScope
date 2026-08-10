@@ -17,6 +17,7 @@
     "ingest:sample": "tsx scripts/ingest-sample-colleges.ts",
     "ingest:nationwide": "tsx scripts/bulk-ingest-nationwide.ts",
     "worker": "tsx scripts/worker.ts",
+    "hierarchy:enrich": "tsx scripts/enrich-hierarchy.ts",
     "test": "vitest run",
     "test:watch": "vitest"
   },

@@ -112,8 +112,47 @@ Unknown attributes are stored/displayed as unknown — they are never treated as
 ## Tests
 
 ```bash
-npm test --workspace=@dormscope/scoring
+npm test                    # unit (scoring + scraper + web)
+npm run test:integration    # Postgres integration (set DATABASE_URL_TEST or ALLOW_TEST_ON_DEV_DB=1)
+npm run test:e2e            # Playwright web E2E (local server or E2E_BASE_URL)
+npm run release:check       # typecheck + unit + integration + lint + build + e2e
 ```
+
+Integration tests expect an isolated Postgres URL via `DATABASE_URL_TEST` (CI service) or, for local dry-runs against a non-production DB only, `ALLOW_TEST_ON_DEV_DB=1`.
+
+## Admin auth
+
+Admin UI uses Clerk + allowlist:
+
+- `ADMIN_USER_IDS` — comma-separated Clerk user IDs
+- `ADMIN_EMAILS` — comma-separated emails
+
+If `CLERK_SECRET_KEY` is set but both allowlists are empty, admin pages fail with an explicit configuration error (not a silent redirect). Mutating admin APIs also accept `ADMIN_API_KEY` / `x-admin-key`.
+
+## Scraper / data ops
+
+```bash
+# Worker modes: discover | extract | enrich | hierarchy | validate | nationwide
+set MODE=enrich
+npm run scraper:nationwide
+
+# Hierarchy enrichment (APPLY=1 to write)
+set APPLY=1
+npm run scraper:hierarchy
+
+# Quarantine high-confidence junk names (never hard-delete)
+set APPLY=1
+npm run db:quarantine-junk
+
+# Recompute quality scores after enrichment
+set APPLY=1
+npm run db:recompute-scores
+
+# Coverage / audits
+npm run db:coverage
+```
+
+Durable public write rate limiting uses Redis when `REDIS_URL` is set; otherwise a Postgres `RateLimitBucket` table.
 
 ## Deploy (Vercel)
 
@@ -121,6 +160,7 @@ npm test --workspace=@dormscope/scoring
 - Required env: `DATABASE_URL` (Neon), `ADMIN_API_KEY` (mutating admin/scraper routes)
 - Set `NEXT_PUBLIC_API_URL` to **empty** so the app uses same-origin `/api` routes
 - Do not rely on Vercel serverless for Playwright scraping
+- Configure `ADMIN_USER_IDS` and/or `ADMIN_EMAILS` when Clerk is enabled
 
 ## Coverage (honest)
 
