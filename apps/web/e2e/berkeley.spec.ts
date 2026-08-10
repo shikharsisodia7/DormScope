@@ -54,6 +54,6 @@ test.describe("Berkeley college page", () => {
     await expectPageOk(page);
 
     // Fixture dorms: Unit 1, Unit 2
-    await expect(page.getByRole("heading", { name: /^Unit 1$/i }).or(page.getByText("Unit 1").first())).toBeVisible();
+    await expect(page.getByRole("link", { name: /Unit 1/i }).first()).toBeVisible();
   });
 });
